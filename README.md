@@ -1,0 +1,164 @@
+# Code Archaeologist
+
+An **autonomous, 100% local** AI agent that finds the most problematic parts of a legacy Java system (6, 7 and 8), modernizes that code to Java 17/21 on separate branches, and proves, with tests it writes itself, that the system's behavior did not change.
+
+> **Status:** project skeleton. The structure and build are in place, but no agent has been implemented yet. See the [roadmap](#roadmap).
+
+## The problem
+
+Old Java systems pile up years of patches and have almost no tests. Nobody remembers why each decision was made, so nobody touches the code for fear of breaking production. Code review tools flag style issues, but they don't answer the question that matters: **where do we start, and how do we change it without breaking it?**
+
+The Archaeologist doesn't critique syntax. It decides **where** to act based on evidence: it crosses Git history (what changes often, what produces bugs, who touches it) with the structure of the code (complexity, size). Then it delivers the change already protected by tests.
+
+## How it works
+
+Once started with a repository path, the agent runs the whole cycle with no human intervention:
+
+| Step | What happens |
+|---|---|
+| 1. Reconnaissance | Detects the hardware; picks, downloads and calibrates the local model |
+| 2. Excavation | Reads the Git history (default: 5 years): churn, bug-fix commits, authors per file |
+| 3. Mapping | Measures the code: Java version, complexity, size, dependencies |
+| 4. Prioritization | Scores the risk of each class and builds the target queue |
+| 5. Protection | Generates characterization tests on the old code and confirms they pass |
+| 6. Restoration | Modernizes the target on a new, isolated branch |
+| 7. Verification | Runs the same tests on the new code; measures coverage and mutation score |
+| 8. Record | Commits to the branch, writes the report and moves on to the next target |
+
+When a test fails after a refactoring, the agent reads the error, fixes the code and tries again, up to a retry limit (e.g. 3). If it still fails, it discards the branch and records why. Every branch that survives has green tests.
+
+### Safety limits
+
+- **Never touches the main branch.** It works only on `archaeologist/*` branches, in a separate working copy. Merging is the team's decision.
+- **Never edits the characterization tests** to make a refactoring pass. The Judge checks the hashes of the test files.
+- **Builds and tests run in Docker with no network** (`--network none`).
+- **Repository content is data, never instructions.** Comments, strings and commit messages are never followed as orders (prompt injection protection).
+- **Everything goes to an audit log**, so the team can understand each decision later.
+- **Nothing leaves the machine.** The model runs locally through [Ollama](https://ollama.com). The only internet access is the initial model download, which can also be done ahead of time for air-gapped environments.
+
+## Agents
+
+Each agent is a package under `src/main/java/com/archaeologist/`. Each package's `package-info.java` describes its responsibility.
+
+| Agent | Package | Responsibility | Uses LLM? |
+|---|---|---|---|
+| Scout | `scout` | Detects the hardware, picks and calibrates the model | Only for calibration |
+| Excavator | `excavator` | Mines Git: churn, bug fixes, authors, temporal coupling | Optional (ambiguous commits) |
+| Cartographer | `cartographer` | Measures the code: complexity, size, dependencies | No |
+| Prioritization | `prioritization` | Scores risk and picks the targets | No |
+| Guardian | `guardian` | Generates and runs the characterization tests | Yes |
+| Restorer | `restorer` | Migrates with OpenRewrite and modernizes with the LLM | Yes |
+| Judge | `judge` | Approves, sends back for fixes, or discards, using objective rules only | No |
+| Chronicler | `chronicler` | Commits, reports and audit log | Only to summarize |
+
+Support packages: `inference` (Ollama client) and `orchestrator` (the graph that connects the agents, with state and checkpoints).
+
+## How the agent decides where to act
+
+Files that change often **and** are complex concentrate bugs and maintenance cost. That's why the risk score is multiplicative: a file only ranks high if it has both.
+
+```
+risk = churn × complexity × (1 + w_fixes × fixes + w_authors × authors)
+```
+
+Each signal is normalized from 0 to 1 within the repository, and the weights are configurable. The final queue also considers **feasibility**: a target that doesn't fit in the model's context, or that hits the database in every method, goes to the back of the queue.
+
+## Refactoring strategy
+
+1. **One base migration branch** (`archaeologist/migrate-java21`): OpenRewrite migrates the build and the APIs of the whole repository. The Java version is set per module, not per class.
+2. **Modernizations stacked on the base branch**: one refactoring per branch (Streams, switch expressions, pattern matching, text blocks, `var`), done with the LLM.
+
+Keeping the two apart shows whether a failure came from the JDK change or from the refactoring. Pitfalls the Restorer must respect:
+
+- Records are immutable and change the API (`getName()` becomes `name()`). They don't fit JPA entities or classes populated through setters.
+- Streams can change execution order, exception handling and performance in hot loops.
+- Reflection, serialization and custom `equals`/`hashCode` need extra care.
+
+## Stack
+
+| Layer | Tool |
+|---|---|
+| Language and build | Java 21, Spring Boot 4.1, Maven (with wrapper) |
+| Git mining | `git log --numstat` |
+| Code metrics | JavaParser |
+| Deterministic migration | OpenRewrite (`rewrite-migrate-java`) |
+| Local inference | Ollama, through Spring AI |
+| Orchestration | LangGraph4j or a custom state machine (to be decided) |
+| Generated tests | JUnit + Mockito |
+| Test quality | JaCoCo (coverage) + PIT (mutation testing) |
+| Isolation | Docker with no network (through Testcontainers) |
+
+## Requirements
+
+- JDK 21 or newer
+- Git on the `PATH`
+- Later: Docker and Ollama
+
+Maven doesn't need to be installed: the project uses the Maven Wrapper (`mvnw`).
+
+## Build and run
+
+```bash
+# Linux/macOS
+./mvnw verify
+
+# Windows
+mvnw.cmd verify
+```
+
+This compiles the code, runs the tests and builds `target/archaeologist.jar`:
+
+```bash
+java -jar target/archaeologist.jar
+```
+
+For now the application only starts the Spring context and exits.
+
+## Project structure
+
+```
+archaeologist-agent/
+├── config/
+│   └── models.yaml                  # model catalog read by the Scout
+├── src/
+│   ├── main/java/com/archaeologist/
+│   │   ├── ArchaeologistApplication.java
+│   │   ├── scout/
+│   │   ├── excavator/
+│   │   ├── cartographer/
+│   │   ├── prioritization/
+│   │   ├── guardian/
+│   │   ├── restorer/
+│   │   ├── judge/
+│   │   ├── chronicler/
+│   │   ├── inference/
+│   │   └── orchestrator/
+│   ├── main/resources/
+│   │   └── application.yml
+│   └── test/java/com/archaeologist/
+├── mvnw, mvnw.cmd                   # Maven Wrapper
+└── pom.xml
+```
+
+## Roadmap
+
+The order starts with what delivers value without an LLM, and tackles the riskiest part (characterization tests) early.
+
+| Phase | Deliverable | Guiding question |
+|---|---|---|
+| 1 | Excavator + Cartographer + Prioritization: a `hotspots <repo>` command produces the hotspot report | Does the ranking point at the classes the team already knows are trouble? |
+| 2 | Guardian: characterization tests with a fixed local model | Can a local model generate tests that compile and pass on a real hotspot? |
+| 3 | Restorer: base branch with OpenRewrite + modernizations with the LLM | When should a transformation be deterministic, and when is the LLM worth it? |
+| 4 | Judge + Orchestrator with the retry loop and checkpoints | What state must be saved to resume an interrupted run? |
+| 5 | Chronicler: reports and audit log | What does a developer need to read to trust a branch without reviewing it line by line? |
+| 6 | Scout: hardware detection and automatic model selection | How do you reliably measure available memory on Linux, Windows and macOS? |
+
+Until phase 6, the model is fixed in `config/models.yaml`.
+
+## Measuring success
+
+- Percentage of targets refactored with all tests green
+- Coverage and mutation score before and after, per module
+- Reduction in cyclomatic complexity in the treated hotspots
+- Percentage of code migrated to Java 17/21 APIs and features
+- Average time per target on each machine profile

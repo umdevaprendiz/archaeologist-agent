@@ -1,0 +1,19 @@
+prototype.pdf
+.env
+
+# Build
+target/
+out/
+
+# Agent output
+archaeologist-output/
+machine-profile.json
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# Operating system
+.DS_Store
+Thumbs.db
