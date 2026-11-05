@@ -11,3 +11,35 @@ spring:
 logging:
   level:
     root: warn
+    # The agent reports startup failures itself, one readable line per problem (see ErrorReporter).
+    # Spring's own reports are switched off: they are long and can show absolute paths.
+    org.springframework.boot.SpringApplication: "off"
+    org.springframework.boot.diagnostics.LoggingFailureAnalysisReporter: "off"
+    org.springframework.context.annotation.AnnotationConfigApplicationContext: error
+
+# Settings of the agent (ArchaeologistProperties). They are checked at startup: an invalid value
+# stops the agent with exit code 4. Override any of them with an environment variable (dots become
+# underscores and dashes are dropped: archaeologist.retry.max-attempts -> ARCHAEOLOGIST_RETRY_MAXATTEMPTS)
+# or a system property (java -Darchaeologist.history.years=3 -jar archaeologist.jar ...).
+archaeologist:
+  history:
+    # How many years of Git history the Excavator reads
+    years: 5
+  # risk = churn * complexity * (1 + fixes * fix commits + authors * distinct authors)
+  # Starting values: feature PRI-03 calibrates them on real repositories.
+  risk-weights:
+    fixes: 1.0
+    authors: 0.5
+  retry:
+    # Attempts per target, the first one included, before its branch is discarded
+    max-attempts: 3
+  quality:
+    # Minimum quality of the characterization tests on the target class, in percent.
+    # Starting values: feature GRD-04 tunes them.
+    min-line-coverage-percent: 80
+    min-mutation-score-percent: 60
+  output:
+    # Each run writes its reports, state and logs to its own subfolder of this folder
+    folder: archaeologist-output
+  # Model catalog to use instead of the copy of config/models.yaml bundled with the agent
+  # model-catalog: my-models.yaml

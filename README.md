@@ -130,8 +130,37 @@ The agents behind the commands are not implemented yet: for now, `hotspots` and 
 | 1 | The command failed (see the error message) |
 | 2 | Invalid command line: unknown command, or a missing or invalid argument |
 | 3 | The repository path does not exist, is not a folder, or is not a Git repository |
+| 4 | Invalid configuration: a setting or the model catalog is missing, unknown or out of range |
 
 Errors are printed as one readable line on standard error. Messages show paths exactly as typed, never expanded to absolute paths.
+
+### Configuration
+
+The defaults are bundled with the agent, in `src/main/resources/application.yml`, with a comment for each setting. Override any of them with an environment variable or a Java system property:
+
+```bash
+# Linux/macOS: environment variable (upper case, dots become underscores, dashes are dropped)
+ARCHAEOLOGIST_HISTORY_YEARS=3 java -jar target/archaeologist.jar hotspots <repo>
+
+# Windows (PowerShell)
+$env:ARCHAEOLOGIST_HISTORY_YEARS = "3"; java -jar target/archaeologist.jar hotspots <repo>
+
+# Any OS: system property
+java -Darchaeologist.history.years=3 -jar target/archaeologist.jar hotspots <repo>
+```
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `archaeologist.history.years` | `5` | Years of Git history the Excavator reads |
+| `archaeologist.risk-weights.fixes` | `1.0` | Weight of the bug-fix commits in the risk score |
+| `archaeologist.risk-weights.authors` | `0.5` | Weight of the number of distinct authors in the risk score |
+| `archaeologist.retry.max-attempts` | `3` | Attempts per target, the first one included, before its branch is discarded |
+| `archaeologist.quality.min-line-coverage-percent` | `80` | Minimum line coverage of the characterization tests on the target class |
+| `archaeologist.quality.min-mutation-score-percent` | `60` | Minimum mutation score of the characterization tests on the target class |
+| `archaeologist.output.folder` | `archaeologist-output` | Each run writes its reports, state and logs to its own subfolder of this folder |
+| `archaeologist.model-catalog` | the bundled `config/models.yaml` | Model catalog to use instead, without rebuilding |
+
+Settings are checked at startup. A value out of range, or an unknown setting (usually a typo, such as `ARCHAEOLOGIST_RETRY_MAXATEMPTS`), stops the agent with exit code 4 before it does any work. An `application.yml` in the current folder is never read: that folder may be the repository under analysis, and its files are data, not settings.
 
 ## Project structure
 
@@ -143,6 +172,7 @@ archaeologist-agent/
 │   ├── main/java/com/archaeologist/
 │   │   ├── ArchaeologistApplication.java
 │   │   ├── cli/                     # archaeologist command and subcommands
+│   │   ├── config/                  # typed settings and the model catalog
 │   │   ├── scout/
 │   │   ├── excavator/
 │   │   ├── cartographer/
@@ -154,8 +184,9 @@ archaeologist-agent/
 │   │   ├── inference/
 │   │   └── orchestrator/
 │   ├── main/resources/
-│   │   └── application.yml
+│   │   └── application.yml          # default settings
 │   └── test/java/com/archaeologist/
+├── LICENSE                          # Apache License 2.0
 ├── mvnw, mvnw.cmd                   # Maven Wrapper
 └── pom.xml
 ```
@@ -184,3 +215,9 @@ The full breakdown into features, with IDs and dependencies, is in [docs/FEATURE
 - Reduction in cyclomatic complexity in the treated hotspots
 - Percentage of code migrated to Java 17/21 APIs and features
 - Average time per target on each machine profile
+
+## License
+
+Copyright 2026 the Code Archaeologist contributors.
+
+Free to use, modify and distribute, including commercially, under the terms of the [Apache License 2.0](LICENSE).

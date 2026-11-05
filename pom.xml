@@ -17,6 +17,13 @@
     <name>Code Archaeologist</name>
     <description>Local agent that finds and modernizes the hotspots of legacy Java systems.</description>
 
+    <licenses>
+        <license>
+            <name>Apache-2.0</name>
+            <url>https://www.apache.org/licenses/LICENSE-2.0</url>
+        </license>
+    </licenses>
+
     <properties>
         <java.version>21</java.version>
         <picocli.version>4.7.7</picocli.version>
@@ -36,6 +43,12 @@
             <version>${picocli.version}</version>
         </dependency>
 
+        <!-- Checks the settings and the model catalog at startup (Bean Validation) -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-validation</artifactId>
+        </dependency>
+
         <!-- Tests -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
@@ -47,6 +60,31 @@
     <build>
         <finalName>archaeologist</finalName>
         <plugins>
+            <!-- The model catalog lives in config/, where it is easy to find and edit. The build bundles
+                 a copy into the jar, so the agent works from any folder. -->
+            <plugin>
+                <artifactId>maven-resources-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>bundle-model-catalog</id>
+                        <phase>process-resources</phase>
+                        <goals>
+                            <goal>copy-resources</goal>
+                        </goals>
+                        <configuration>
+                            <outputDirectory>${project.build.outputDirectory}</outputDirectory>
+                            <resources>
+                                <resource>
+                                    <directory>config</directory>
+                                    <includes>
+                                        <include>models.yaml</include>
+                                    </includes>
+                                </resource>
+                            </resources>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
             <!-- Builds an executable target/archaeologist.jar, plus the build info shown by the version option -->
             <plugin>
                 <groupId>org.springframework.boot</groupId>

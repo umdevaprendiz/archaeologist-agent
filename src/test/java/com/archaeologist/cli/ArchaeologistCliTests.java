@@ -48,7 +48,7 @@ class ArchaeologistCliTests {
         assertThat(out.toString())
                 .contains("Usage: archaeologist", "hotspots", "run", "scout", "help", "--stacktrace")
                 .contains("Runs 100%").doesNotContain("%%")
-                .contains("Exit codes:", "Invalid command line");
+                .contains("Exit codes:", "Invalid command line", "Invalid configuration");
     }
 
     @Test
