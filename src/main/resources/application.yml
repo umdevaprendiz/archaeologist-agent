@@ -39,7 +39,9 @@ archaeologist:
     min-line-coverage-percent: 80
     min-mutation-score-percent: 60
   output:
-    # Each run writes its reports, state and logs to its own subfolder of this folder
+    # Each run writes its reports, state and logs to its own subfolder of this folder.
+    # A relative path is resolved against the current folder. When the agent creates the folder,
+    # it adds a .gitignore that ignores everything in it, so it never shows up in git status.
     folder: archaeologist-output
   # Model catalog to use instead of the copy of config/models.yaml bundled with the agent
   # model-catalog: my-models.yaml

@@ -7,17 +7,36 @@ import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 import picocli.CommandLine;
 import picocli.CommandLine.Help.Ansi;
 
 @SpringBootTest
 class ArchaeologistCliTests {
+
+    private static final Pattern RUN_STARTED = Pattern.compile("Run (\\S+): output in (.+)");
+
+    /** Runs write their folders here, not in the project's own archaeologist-output. */
+    @TempDir
+    static Path outputParent;
+
+    @DynamicPropertySource
+    static void outputFolder(DynamicPropertyRegistry registry) {
+        registry.add("archaeologist.output.folder", () -> outputFolder().toString());
+    }
+
+    private static Path outputFolder() {
+        return outputParent.resolve("archaeologist-output");
+    }
 
     @Autowired
     private ArchaeologistCli cli;
@@ -128,9 +147,20 @@ class ArchaeologistCliTests {
 
     @ParameterizedTest
     @ValueSource(strings = {"hotspots", "run"})
-    void validRepositoryReachesTheCommand(String command) throws IOException {
+    void validRepositoryStartsARunInItsOwnFolder(String command) throws IOException {
         assertThat(run(command, gitRepository().toString())).isEqualTo(ExitCode.FAILURE.code());
         assertThat(err.toString()).contains("Error: The '" + command + "' command is not implemented yet");
+
+        Matcher started = RUN_STARTED.matcher(out.toString().strip());
+        assertThat(started.matches()).as("run started: %s", out).isTrue();
+        assertThat(Path.of(started.group(2))).isEqualTo(outputFolder().resolve(started.group(1))).isDirectory();
+    }
+
+    @Test
+    void invalidRepositoryStartsNoRun() {
+        run("run", tempDir.resolve("missing").toString());
+
+        assertThat(out.toString()).isEmpty();
     }
 
     @Test

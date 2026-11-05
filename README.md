@@ -122,7 +122,18 @@ java -jar target/archaeologist.jar scout             # detect the hardware and p
 
 `archaeologist help <command>` (or `<command> --help`) shows the details of each command. Add `--stacktrace` to see the full details of an unexpected error.
 
-The agents behind the commands are not implemented yet: for now, `hotspots` and `run` check that `<repo>` is a Git repository, and every command then stops with a "not implemented yet" message.
+The agents behind the commands are not implemented yet: for now, `hotspots` and `run` check that `<repo>` is a Git repository and create the run's output folder, and every command then stops with a "not implemented yet" message.
+
+### Output
+
+Each run of `hotspots` or `run` gets its own folder for its reports, state and logs, and prints where it is:
+
+```
+$ java -jar target/archaeologist.jar hotspots .
+Run 20261105T221814Z-3f9a: output in archaeologist-output/20261105T221814Z-3f9a
+```
+
+The run id is the start time in UTC plus a random suffix, so run folders sort by date. The output folder is `archaeologist-output` in the current folder (setting `archaeologist.output.folder`). When you run the agent from inside the repository under analysis, the output folder lands there too, but Git ignores it: the agent creates it with a `.gitignore` that ignores everything in it, so the repository's `git status` stays clean and no report is committed by accident. If the output folder already exists, the agent leaves it as it is.
 
 ### Exit codes
 
@@ -176,6 +187,7 @@ archaeologist-agent/
 │   │   ├── ArchaeologistApplication.java
 │   │   ├── cli/                     # archaeologist command and subcommands
 │   │   ├── config/                  # typed settings and the model catalog
+│   │   ├── run/                     # run ids and output folders
 │   │   ├── scout/
 │   │   ├── excavator/
 │   │   ├── cartographer/
