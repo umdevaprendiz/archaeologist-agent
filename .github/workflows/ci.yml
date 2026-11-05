@@ -1,0 +1,66 @@
+# Builds the agent and runs every test on Linux, Windows and macOS, on every push and pull request.
+# The agent is meant for anyone, on any of these systems: a change that breaks one of them fails here.
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+# The workflow only reads the code, so pull requests from forks can't change anything.
+permissions:
+  contents: read
+
+# A newer push to the same branch or pull request cancels the run still in progress.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: verify (${{ matrix.os }}, JDK ${{ matrix.java }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      # Every job runs to the end, so a failure on one system doesn't hide another
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        # The minimum JDK (java.version in pom.xml)
+        java: [21]
+        include:
+          # Users run whatever JDK they have: also check the latest LTS
+          - os: ubuntu-latest
+            java: 25
+    steps:
+      - name: Check out the code
+        uses: actions/checkout@v7
+        with:
+          # No token is left in the clone: the build has no reason to talk to GitHub
+          persist-credentials: false
+
+      - name: Set up JDK ${{ matrix.java }}
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: ${{ matrix.java }}
+          cache: maven
+
+      # Run as a user would. On Linux and macOS this also checks that mvnw is still executable.
+      - name: Build and test
+        if: runner.os != 'Windows'
+        run: ./mvnw --batch-mode --no-transfer-progress verify
+
+      - name: Build and test
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: mvnw.cmd --batch-mode --no-transfer-progress verify
+
+      - name: Keep the test reports of a failed run
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-reports-${{ matrix.os }}-jdk${{ matrix.java }}
+          path: target/surefire-reports/
+          if-no-files-found: ignore
+          retention-days: 7

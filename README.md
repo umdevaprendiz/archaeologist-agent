@@ -109,6 +109,8 @@ mvnw.cmd verify
 
 This compiles the code, runs the tests and builds `target/archaeologist.jar`.
 
+The same build runs on every push and pull request, on Linux, Windows and macOS with JDK 21, plus Linux with JDK 25 ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)). When a job fails, its test reports are kept for 7 days in the run's artifacts.
+
 ### Commands
 
 ```bash
@@ -166,6 +168,7 @@ Settings are checked at startup. A value out of range, or an unknown setting (us
 
 ```
 archaeologist-agent/
+├── .github/workflows/ci.yml         # build and tests on Linux, Windows and macOS
 ├── config/
 │   └── models.yaml                  # model catalog read by the Scout
 ├── src/

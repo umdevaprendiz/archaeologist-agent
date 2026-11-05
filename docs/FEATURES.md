@@ -26,7 +26,7 @@ IDs have a prefix per area (e.g. `EXC-02`), so branches can be named `feature/EX
 | FND-03 | Typed configuration | Settings bound to typed properties (history years, risk weights, retry limit, quality thresholds, output folder) and loading of `config/models.yaml`. **Done.** | FND-01 |
 | FND-04 | Run output folder | Each run gets its own folder (`archaeologist-output/<run-id>/`) for reports, state and logs | FND-03 |
 | FND-05 | Audit log | Append-only JSON Lines log of every agent action and decision: timestamp, agent, input summary, outcome | FND-04 |
-| FND-06 | Continuous integration | Pipeline that runs `mvnw verify` on every push and pull request | FND-01 |
+| FND-06 | Continuous integration | Pipeline that runs `mvnw verify` on every push and pull request, on Linux, Windows and macOS. **Done.** | FND-01 |
 | FND-07 | Sample legacy repository | A small Java 6/7-style project with a scripted Git history (god class, bug-fix commits, renames, JDBC, `Date` and `Random` usage), used by tests, demos and calibration | — |
 
 ## 1. Excavator: Git mining (EXC)
