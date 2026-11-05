@@ -2,7 +2,7 @@
 
 An **autonomous, 100% local** AI agent that finds the most problematic parts of a legacy Java system (6, 7 and 8), modernizes that code to Java 17/21 on separate branches, and proves, with tests it writes itself, that the system's behavior did not change.
 
-> **Status:** project skeleton. The structure and build are in place, but no agent has been implemented yet. See the [roadmap](#roadmap).
+> **Status:** early development. The build and the command-line interface are in place, but no agent has been implemented yet. See the [roadmap](#roadmap).
 
 ## The problem
 
@@ -79,6 +79,7 @@ Keeping the two apart shows whether a failure came from the JDK change or from t
 | Layer | Tool |
 |---|---|
 | Language and build | Java 21, Spring Boot 4.1, Maven (with wrapper) |
+| Command line | picocli |
 | Git mining | `git log --numstat` |
 | Code metrics | JavaParser |
 | Deterministic migration | OpenRewrite (`rewrite-migrate-java`) |
@@ -106,13 +107,31 @@ Maven doesn't need to be installed: the project uses the Maven Wrapper (`mvnw`).
 mvnw.cmd verify
 ```
 
-This compiles the code, runs the tests and builds `target/archaeologist.jar`:
+This compiles the code, runs the tests and builds `target/archaeologist.jar`.
+
+### Commands
 
 ```bash
-java -jar target/archaeologist.jar
+java -jar target/archaeologist.jar --help
+java -jar target/archaeologist.jar hotspots <repo>   # rank the riskiest classes (read-only)
+java -jar target/archaeologist.jar run <repo>        # full cycle, on archaeologist/* branches
+java -jar target/archaeologist.jar scout             # detect the hardware and pick the model
 ```
 
-For now the application only starts the Spring context and exits.
+`archaeologist help <command>` (or `<command> --help`) shows the details of each command. Add `--stacktrace` to see the full details of an unexpected error.
+
+The agents behind the commands are not implemented yet: for now, `hotspots` and `run` check that `<repo>` is a Git repository, and every command then stops with a "not implemented yet" message.
+
+### Exit codes
+
+| Code | Meaning |
+|---|---|
+| 0 | Success |
+| 1 | The command failed (see the error message) |
+| 2 | Invalid command line: unknown command, or a missing or invalid argument |
+| 3 | The repository path does not exist, is not a folder, or is not a Git repository |
+
+Errors are printed as one readable line on standard error. Messages show paths exactly as typed, never expanded to absolute paths.
 
 ## Project structure
 
@@ -123,6 +142,7 @@ archaeologist-agent/
 ├── src/
 │   ├── main/java/com/archaeologist/
 │   │   ├── ArchaeologistApplication.java
+│   │   ├── cli/                     # archaeologist command and subcommands
 │   │   ├── scout/
 │   │   ├── excavator/
 │   │   ├── cartographer/
@@ -154,6 +174,8 @@ The order starts with what delivers value without an LLM, and tackles the riskie
 | 6 | Scout: hardware detection and automatic model selection | How do you reliably measure available memory on Linux, Windows and macOS? |
 
 Until phase 6, the model is fixed in `config/models.yaml`.
+
+The full breakdown into features, with IDs and dependencies, is in [docs/FEATURES.md](docs/FEATURES.md).
 
 ## Measuring success
 
