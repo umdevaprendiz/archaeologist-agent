@@ -1,0 +1,1742 @@
+# Scripted history of the sample legacy repository, replayed by com.archaeologist.sample.SampleRepository.
+#
+# A small order system in the style of Java 6/7, with the signals the agent looks for:
+# - OrderManager is the hotspot: a god class changed by every author, with most of the bug fixes;
+# - TaxCalculator is complex but stable: written once, fixed once;
+# - Messages is simple but changed often, and is encoded in ISO-8859-1, as old projects often were;
+# - util/DateHelper is renamed to common/DateUtils, and changed before and after;
+# - two bulk commits touch every source file (license header, company rename);
+# - bug fixes in English and Portuguese, issue keys (SHOP-123) and vague messages ("ajustes", "wip");
+# - JDBC, java.util.Date, Random, a static singleton, reflection and file I/O;
+# - an interface, a generated class, one JUnit 4 test, a .mailmap and a file with CRLF line endings.
+# All authors are fictional and use addresses at reserved example domains.
+#
+# Format:
+#   author <key>: <Name> <<e-mail>>
+#   file <path>: encoding <charset> | line-endings CRLF
+#   commit <days before today> <author key>, then the message on the next line, then operations:
+#     add <path>                 content between <<< and >>>
+#     replace <path>             <<< old === new >>> (old must occur exactly once)
+#     replace-all *.<ext>        <<< old === new >>> (every occurrence, in every such file holding it)
+#     prepend *.<ext>            <<< text >>> (to every such file)
+#     rename <from> -> <to>
+
+author ana: Ana Souza <ana.souza@example.com>
+author ana2: Ana S. <ana@corp.example.com>
+author bruno: Bruno Lima <bruno.lima@example.com>
+author carla: Carla Mendes <carla@example.com>
+author diego: Diego Rocha <diego.rocha@example.org>
+author eva: Eva Martins <eva@example.net>
+
+file src/main/java/com/acme/shop/Messages.java: encoding ISO-8859-1
+file src/main/java/com/acme/shop/ReportGenerator.java: line-endings CRLF
+
+commit 2380 ana
+Initial import of the order system
+
+add pom.xml
+<<<
+<?xml version="1.0" encoding="ISO-8859-1"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/maven-v4_0_0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <groupId>com.acme</groupId>
+    <artifactId>legacy-shop</artifactId>
+    <version>1.0-SNAPSHOT</version>
+    <packaging>jar</packaging>
+    <name>ACME Shop</name>
+
+    <properties>
+        <project.build.sourceEncoding>ISO-8859-1</project.build.sourceEncoding>
+    </properties>
+
+    <dependencies>
+        <dependency>
+            <groupId>hsqldb</groupId>
+            <artifactId>hsqldb</artifactId>
+            <version>1.8.0.10</version>
+            <scope>runtime</scope>
+        </dependency>
+        <dependency>
+            <groupId>junit</groupId>
+            <artifactId>junit</artifactId>
+            <version>4.8.2</version>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>2.3.2</version>
+                <configuration>
+                    <source>1.6</source>
+                    <target>1.6</target>
+                    <encoding>ISO-8859-1</encoding>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+</project>
+>>>
+
+add README.txt
+<<<
+ACME Shop - order system
+
+Build: mvn package
+Database: HSQLDB, see src/main/resources/shop.properties
+>>>
+
+add src/main/resources/shop.properties
+<<<
+# Database connection
+db.driver=org.hsqldb.jdbcDriver
+db.url=jdbc:hsqldb:hsql://localhost/shop
+db.user=shop
+# The password comes from the SHOP_DB_PASSWORD environment variable
+>>>
+
+add src/main/java/com/acme/shop/OrderManager.java
+<<<
+package com.acme.shop;
+
+import com.acme.shop.db.ConnectionFactory;
+import com.acme.shop.model.Customer;
+import com.acme.shop.model.Order;
+import com.acme.shop.model.OrderItem;
+import com.acme.shop.util.DateHelper;
+
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.Timestamp;
+import java.util.Date;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Random;
+import java.util.Vector;
+
+/**
+ * Manages the orders of the shop: creation, totals, persistence and status changes.
+ */
+public class OrderManager {
+
+    private static OrderManager instance;
+
+    private Random random = new Random();
+
+    private OrderManager() {
+    }
+
+    public static synchronized OrderManager getInstance() {
+        if (instance == null) {
+            instance = new OrderManager();
+        }
+        return instance;
+    }
+
+    public Order createOrder(Customer customer, List items) {
+        if (customer == null) {
+            throw new IllegalArgumentException(Messages.CUSTOMER_REQUIRED);
+        }
+        if (items == null || items.size() == 0) {
+            throw new IllegalArgumentException(Messages.ORDER_EMPTY);
+        }
+        Order order = new Order();
+        order.setNumber(newOrderNumber());
+        order.setCustomer(customer);
+        order.setCreatedAt(new Date());
+        order.setStatus(Order.STATUS_NEW);
+        Vector lines = new Vector();
+        Iterator it = items.iterator();
+        while (it.hasNext()) {
+            OrderItem item = (OrderItem) it.next();
+            lines.add(item);
+        }
+        order.setItems(lines);
+        order.setTotal(calculateTotal(order));
+        save(order);
+        return order;
+    }
+
+    public double calculateTotal(Order order) {
+        double total = 0;
+        for (int i = 0; i < order.getItems().size(); i++) {
+            OrderItem item = (OrderItem) order.getItems().get(i);
+            total = total + item.getPrice() * item.getQuantity();
+        }
+        if (total > 500) {
+            total = total - total * 0.1;
+        }
+        return total;
+    }
+
+    private String newOrderNumber() {
+        return DateHelper.format(new Date(), "yyyyMMdd") + "-" + random.nextInt(10000);
+    }
+
+    public void save(Order order) {
+        Connection connection = null;
+        PreparedStatement statement = null;
+        try {
+            connection = ConnectionFactory.getConnection();
+            statement = connection.prepareStatement("INSERT INTO orders (number, customer_id, created_at, status, total)"
+                    + " VALUES (?, ?, ?, ?, ?)");
+            statement.setString(1, order.getNumber());
+            statement.setLong(2, order.getCustomer().getId());
+            statement.setTimestamp(3, new Timestamp(order.getCreatedAt().getTime()));
+            statement.setInt(4, order.getStatus());
+            statement.setDouble(5, order.getTotal());
+            statement.executeUpdate();
+        } catch (SQLException e) {
+            System.out.println("Error saving order " + order.getNumber() + ": " + e.getMessage());
+        } finally {
+            close(statement, connection);
+        }
+    }
+
+    public Order findOrder(String number) {
+        Connection connection = null;
+        PreparedStatement statement = null;
+        try {
+            connection = ConnectionFactory.getConnection();
+            statement = connection.prepareStatement("SELECT id, status, total, created_at FROM orders WHERE number = ?");
+            statement.setString(1, number);
+            ResultSet rs = statement.executeQuery();
+            if (rs.next()) {
+                Order order = new Order();
+                order.setId(new Long(rs.getLong(1)));
+                order.setNumber(number);
+                order.setStatus(rs.getInt(2));
+                order.setTotal(rs.getDouble(3));
+                order.setCreatedAt(rs.getTimestamp(4));
+                return order;
+            }
+            return null;
+        } catch (SQLException e) {
+            System.out.println("Error reading order " + number + ": " + e.getMessage());
+            return null;
+        } finally {
+            close(statement, connection);
+        }
+    }
+
+    public void cancel(Order order) {
+        if (order.getStatus() == Order.STATUS_NEW) {
+            order.setStatus(Order.STATUS_CANCELLED);
+            updateStatus(order);
+        }
+    }
+
+    private void updateStatus(Order order) {
+        Connection connection = null;
+        PreparedStatement statement = null;
+        try {
+            connection = ConnectionFactory.getConnection();
+            statement = connection.prepareStatement("UPDATE orders SET status = ? WHERE number = ?");
+            statement.setInt(1, order.getStatus());
+            statement.setString(2, order.getNumber());
+            statement.executeUpdate();
+        } catch (SQLException e) {
+            System.out.println("Error updating order " + order.getNumber() + ": " + e.getMessage());
+        } finally {
+            close(statement, connection);
+        }
+    }
+
+    private void close(PreparedStatement statement, Connection connection) {
+        try {
+            if (statement != null) {
+                statement.close();
+            }
+            if (connection != null) {
+                connection.close();
+            }
+        } catch (SQLException e) {
+            // ignore
+        }
+    }
+}
+>>>
+
+add src/main/java/com/acme/shop/Messages.java
+<<<
+package com.acme.shop;
+
+/**
+ * Mensagens exibidas ao usuário.
+ */
+public final class Messages {
+
+    public static final String CUSTOMER_REQUIRED = "Cliente é obrigatório";
+    public static final String ORDER_EMPTY = "Pedido sem itens";
+    public static final String ORDER_NOT_FOUND = "Pedido não encontrado";
+
+    private Messages() {
+    }
+}
+>>>
+
+add src/main/java/com/acme/shop/model/Customer.java
+<<<
+package com.acme.shop.model;
+
+import java.io.Serializable;
+
+public class Customer implements Serializable {
+
+    private static final long serialVersionUID = 1L;
+
+    private long id;
+    private String name;
+    private String state;
+
+    public long getId() {
+        return id;
+    }
+
+    public void setId(long id) {
+        this.id = id;
+    }
+
+    public String getName() {
+        return name;
+    }
+
+    public void setName(String name) {
+        this.name = name;
+    }
+
+    public String getState() {
+        return state;
+    }
+
+    public void setState(String state) {
+        this.state = state;
+    }
+}
+>>>
+
+add src/main/java/com/acme/shop/model/Order.java
+<<<
+package com.acme.shop.model;
+
+import java.io.Serializable;
+import java.util.Date;
+import java.util.List;
+
+public class Order implements Serializable {
+
+    private static final long serialVersionUID = 1L;
+
+    public static final int STATUS_NEW = 0;
+    public static final int STATUS_PAID = 1;
+    public static final int STATUS_SHIPPED = 2;
+    public static final int STATUS_CANCELLED = 3;
+
+    private Long id;
+    private String number;
+    private Customer customer;
+    private Date createdAt;
+    private int status;
+    private List items;
+    private double total;
+
+    public Long getId() {
+        return id;
+    }
+
+    public void setId(Long id) {
+        this.id = id;
+    }
+
+    public String getNumber() {
+        return number;
+    }
+
+    public void setNumber(String number) {
+        this.number = number;
+    }
+
+    public Customer getCustomer() {
+        return customer;
+    }
+
+    public void setCustomer(Customer customer) {
+        this.customer = customer;
+    }
+
+    public Date getCreatedAt() {
+        return createdAt;
+    }
+
+    public void setCreatedAt(Date createdAt) {
+        this.createdAt = createdAt;
+    }
+
+    public int getStatus() {
+        return status;
+    }
+
+    public void setStatus(int status) {
+        this.status = status;
+    }
+
+    public List getItems() {
+        return items;
+    }
+
+    public void setItems(List items) {
+        this.items = items;
+    }
+
+    public double getTotal() {
+        return total;
+    }
+
+    public void setTotal(double total) {
+        this.total = total;
+    }
+}
+>>>
+
+add src/main/java/com/acme/shop/model/OrderItem.java
+<<<
+package com.acme.shop.model;
+
+import java.io.Serializable;
+
+public class OrderItem implements Serializable {
+
+    private static final long serialVersionUID = 1L;
+
+    private String productCode;
+    private String description;
+    private double price;
+    private int quantity;
+
+    public String getProductCode() {
+        return productCode;
+    }
+
+    public void setProductCode(String productCode) {
+        this.productCode = productCode;
+    }
+
+    public String getDescription() {
+        return description;
+    }
+
+    public void setDescription(String description) {
+        this.description = description;
+    }
+
+    public double getPrice() {
+        return price;
+    }
+
+    public void setPrice(double price) {
+        this.price = price;
+    }
+
+    public int getQuantity() {
+        return quantity;
+    }
+
+    public void setQuantity(int quantity) {
+        this.quantity = quantity;
+    }
+}
+>>>
+
+add src/main/java/com/acme/shop/db/ConnectionFactory.java
+<<<
+package com.acme.shop.db;
+
+import java.io.IOException;
+import java.io.InputStream;
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.SQLException;
+import java.util.Properties;
+
+public class ConnectionFactory {
+
+    private static Properties properties;
+
+    public static synchronized Connection getConnection() throws SQLException {
+        if (properties == null) {
+            properties = load();
+        }
+        try {
+            Class.forName(properties.getProperty("db.driver"));
+        } catch (ClassNotFoundException e) {
+            throw new SQLException("Driver not found: " + e.getMessage());
+        }
+        return DriverManager.getConnection(properties.getProperty("db.url"), properties.getProperty("db.user"),
+                System.getenv("SHOP_DB_PASSWORD"));
+    }
+
+    private static Properties load() {
+        Properties loaded = new Properties();
+        InputStream in = ConnectionFactory.class.getResourceAsStream("/shop.properties");
+        try {
+            loaded.load(in);
+        } catch (IOException e) {
+            throw new RuntimeException("Cannot read shop.properties", e);
+        } finally {
+            try {
+                if (in != null) {
+                    in.close();
+                }
+            } catch (IOException e) {
+                // ignore
+            }
+        }
+        return loaded;
+    }
+}
+>>>
+
+add src/main/java/com/acme/shop/util/DateHelper.java
+<<<
+package com.acme.shop.util;
+
+import java.text.SimpleDateFormat;
+import java.util.Date;
+
+public class DateHelper {
+
+    public static String format(Date date, String pattern) {
+        SimpleDateFormat format = new SimpleDateFormat(pattern);
+        return format.format(date);
+    }
+
+    public static Date addDays(Date date, int days) {
+        return new Date(date.getTime() + days * 24L * 60 * 60 * 1000);
+    }
+}
+>>>
+
+commit 2350 bruno
+Add customer DAO
+
+add src/main/java/com/acme/shop/db/CustomerDao.java
+<<<
+package com.acme.shop.db;
+
+import com.acme.shop.model.Customer;
+
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+
+public class CustomerDao {
+
+    public Customer find(long id) {
+        Connection connection = null;
+        try {
+            connection = ConnectionFactory.getConnection();
+            PreparedStatement statement = connection.prepareStatement("SELECT name, state FROM customers WHERE id = ?");
+            statement.setLong(1, id);
+            ResultSet rs = statement.executeQuery();
+            if (!rs.next()) {
+                return null;
+            }
+            Customer customer = new Customer();
+            customer.setId(id);
+            customer.setName(rs.getString(1));
+            customer.setState(rs.getString(2));
+            return customer;
+        } catch (SQLException e) {
+            throw new RuntimeException(e);
+        } finally {
+            if (connection != null) {
+                try {
+                    connection.close();
+                } catch (SQLException e) {
+                    // ignore
+                }
+            }
+        }
+    }
+}
+>>>
+
+commit 2320 ana
+fix: ignore items with zero quantity (SHOP-3)
+
+replace src/main/java/com/acme/shop/OrderManager.java
+<<<
+            OrderItem item = (OrderItem) it.next();
+            lines.add(item);
+===
+            OrderItem item = (OrderItem) it.next();
+            if (item.getQuantity() <= 0) {
+                continue;
+            }
+            lines.add(item);
+>>>
+
+commit 2290 bruno
+corrige desconto para pedidos de 500 reais
+
+replace src/main/java/com/acme/shop/OrderManager.java
+<<<
+        if (total > 500) {
+===
+        if (total >= 500) {
+>>>
+
+commit 2250 carla
+Add tax calculation by state
+
+add src/main/java/com/acme/shop/TaxCalculator.java
+<<<
+package com.acme.shop;
+
+/**
+ * Sales tax by state and amount, following the state tax table.
+ */
+public class TaxCalculator {
+
+    public static double calculate(String state, double amount) {
+        if (state == null || amount <= 0) {
+            return 0;
+        }
+        double rate;
+        if (state.equals("SP")) {
+            rate = amount > 1000 ? 0.18 : 0.12;
+        } else if (state.equals("RJ")) {
+            rate = amount > 1000 ? 0.20 : 0.13;
+        } else if (state.equals("MG")) {
+            if (amount > 2000) {
+                rate = 0.18;
+            } else if (amount > 1000) {
+                rate = 0.15;
+            } else {
+                rate = 0.12;
+            }
+        } else if (state.equals("RS") || state.equals("SC") || state.equals("PR")) {
+            rate = amount > 1500 ? 0.17 : 0.12;
+        } else if (state.equals("BA") || state.equals("PE") || state.equals("CE")) {
+            rate = 0.18;
+        } else if (state.equals("AM")) {
+            // Free trade zone
+            rate = amount > 500 ? 0.07 : 0.0;
+        } else if (state.equals("DF") || state.equals("GO")) {
+            rate = 0.12;
+        } else {
+            rate = 0.17;
+        }
+        double tax = amount * rate;
+        if (tax > 0 && tax < 1) {
+            tax = 1;
+        }
+        return Math.round(tax * 100) / 100.0;
+    }
+
+    public static boolean exempt(String productCode, String state) {
+        if (productCode == null) {
+            return false;
+        }
+        if (productCode.startsWith("BOOK")) {
+            return true;
+        }
+        if (productCode.startsWith("FOOD") && !state.equals("AM")) {
+            return true;
+        }
+        if (productCode.startsWith("MED")) {
+            return state.equals("SP") || state.equals("RJ") || state.equals("MG");
+        }
+        return false;
+    }
+}
+>>>
+
+replace src/main/java/com/acme/shop/OrderManager.java
+<<<
+            total = total - total * 0.1;
+        }
+        return total;
+===
+            total = total - total * 0.1;
+        }
+        total = total + TaxCalculator.calculate(order.getCustomer().getState(), total);
+        return total;
+>>>
+
+commit 2230 carla
+Add unit tests for the tax calculator
+
+add src/test/java/com/acme/shop/TaxCalculatorTest.java
+<<<
+package com.acme.shop;
+
+import static org.junit.Assert.assertEquals;
+
+import org.junit.Test;
+
+public class TaxCalculatorTest {
+
+    @Test
+    public void noTaxWithoutState() {
+        assertEquals(0.0, TaxCalculator.calculate(null, 100), 0.001);
+    }
+
+    @Test
+    public void saoPauloBelowTheLimit() {
+        assertEquals(12.0, TaxCalculator.calculate("SP", 100), 0.001);
+    }
+
+    @Test
+    public void minimumTaxIsOne() {
+        assertEquals(1.0, TaxCalculator.calculate("DF", 5), 0.001);
+    }
+}
+>>>
+
+commit 2190 ana
+update messages
+
+replace src/main/java/com/acme/shop/Messages.java
+<<<
+"Pedido sem itens"
+===
+"O pedido não tem itens"
+>>>
+
+commit 2100 diego
+Add sales report
+
+add src/main/java/com/acme/shop/ReportGenerator.java
+<<<
+package com.acme.shop;
+
+import com.acme.shop.model.Order;
+import com.acme.shop.util.DateHelper;
+
+import java.io.FileWriter;
+import java.io.IOException;
+import java.lang.reflect.Method;
+import java.util.Date;
+import java.util.List;
+
+/**
+ * Writes the sales reports to text files.
+ */
+public class ReportGenerator {
+
+    public void salesReport(Date from, Date to, String fileName) throws IOException {
+        List orders = OrderManager.getInstance().findOrdersBetween(from, to);
+        FileWriter writer = new FileWriter(fileName);
+        try {
+            writer.write("Sales report " + DateHelper.format(from, "dd/MM/yyyy") + " - "
+                    + DateHelper.format(to, "dd/MM/yyyy") + "\n");
+            double total = 0;
+            for (int i = 0; i < orders.size(); i++) {
+                Order order = (Order) orders.get(i);
+                writer.write(order.getNumber() + ";" + value(order, "getTotal") + "\n");
+                total = total + order.getTotal();
+            }
+            writer.write("Total: " + total + "\n");
+        } finally {
+            writer.close();
+        }
+    }
+
+    /** Reads a property of the order by name, so new columns need no code change. */
+    private String value(Order order, String getter) {
+        try {
+            Method method = order.getClass().getMethod(getter, new Class[0]);
+            return String.valueOf(method.invoke(order, new Object[0]));
+        } catch (Exception e) {
+            return "";
+        }
+    }
+}
+>>>
+
+replace src/main/java/com/acme/shop/OrderManager.java
+<<<
+    public void cancel(Order order) {
+===
+    public List findOrdersBetween(Date from, Date to) {
+        List orders = new Vector();
+        Connection connection = null;
+        PreparedStatement statement = null;
+        try {
+            connection = ConnectionFactory.getConnection();
+            statement = connection.prepareStatement("SELECT number FROM orders WHERE created_at >= ? AND created_at < ?");
+            statement.setTimestamp(1, new Timestamp(from.getTime()));
+            statement.setTimestamp(2, new Timestamp(to.getTime()));
+            ResultSet rs = statement.executeQuery();
+            while (rs.next()) {
+                Order order = findOrder(rs.getString(1));
+                if (order != null) {
+                    orders.add(order);
+                }
+            }
+        } catch (SQLException e) {
+            System.out.println("Error listing orders: " + e.getMessage());
+        } finally {
+            close(statement, connection);
+        }
+        return orders;
+    }
+
+    public void cancel(Order order) {
+>>>
+
+commit 2000 bruno
+hotfix: pedidos duplicados ao salvar duas vezes
+
+replace src/main/java/com/acme/shop/OrderManager.java
+<<<
+    public void save(Order order) {
+        Connection connection = null;
+===
+    public void save(Order order) {
+        if (findOrder(order.getNumber()) != null) {
+            return;
+        }
+        Connection connection = null;
+>>>
+
+commit 1950 eva
+Add coupon support
+
+replace src/main/java/com/acme/shop/model/Order.java
+<<<
+    private double total;
+===
+    private double total;
+    private String coupon;
+>>>
+
+replace src/main/java/com/acme/shop/model/Order.java
+<<<
+    public void setTotal(double total) {
+        this.total = total;
+    }
+}
+===
+    public void setTotal(double total) {
+        this.total = total;
+    }
+
+    public String getCoupon() {
+        return coupon;
+    }
+
+    public void setCoupon(String coupon) {
+        this.coupon = coupon;
+    }
+}
+>>>
+
+replace src/main/java/com/acme/shop/OrderManager.java
+<<<
+        total = total + TaxCalculator.calculate(order.getCustomer().getState(), total);
+        return total;
+    }
+===
+        if (order.getCoupon() != null) {
+            total = applyCoupon(total, order.getCoupon());
+        }
+        total = total + TaxCalculator.calculate(order.getCustomer().getState(), total);
+        return total;
+    }
+
+    private double applyCoupon(double total, String coupon) {
+        if (coupon.equals("WELCOME10")) {
+            return total * 0.9;
+        } else if (coupon.equals("BLACKFRIDAY")) {
+            return total * 0.7;
+        } else if (coupon.equals("FRETE")) {
+            return total;
+        } else if (coupon.startsWith("VIP")) {
+            return total * 0.85;
+        }
+        return total;
+    }
+>>>
+
+commit 1900 ana
+ajustes
+
+replace src/main/java/com/acme/shop/Messages.java
+<<<
+    public static final String ORDER_NOT_FOUND = "Pedido não encontrado";
+===
+    public static final String ORDER_NOT_FOUND = "Pedido não encontrado";
+    public static final String COUPON_INVALID = "Cupom inválido";
+>>>
+
+replace src/main/java/com/acme/shop/OrderManager.java
+<<<
+            return total * 0.85;
+        }
+        return total;
+    }
+===
+            return total * 0.85;
+        }
+        System.out.println(Messages.COUPON_INVALID + ": " + coupon);
+        return total;
+    }
+>>>
+
+commit 1850 eva
+fix coupon rounding (SHOP-21)
+
+replace src/main/java/com/acme/shop/OrderManager.java
+<<<
+            return total * 0.9;
+===
+            return Math.round(total * 0.9 * 100) / 100.0;
+>>>
+
+commit 1800 bruno
+erro ao cancelar pedido já enviado
+
+replace src/main/java/com/acme/shop/Messages.java
+<<<
+    public static final String COUPON_INVALID = "Cupom inválido";
+===
+    public static final String COUPON_INVALID = "Cupom inválido";
+    public static final String ORDER_ALREADY_SHIPPED = "Pedido já enviado não pode ser cancelado";
+>>>
+
+replace src/main/java/com/acme/shop/OrderManager.java
+<<<
+    public void cancel(Order order) {
+        if (order.getStatus() == Order.STATUS_NEW) {
+            order.setStatus(Order.STATUS_CANCELLED);
+            updateStatus(order);
+        }
+    }
+===
+    public void cancel(Order order) {
+        if (order.getStatus() == Order.STATUS_SHIPPED) {
+            throw new IllegalStateException(Messages.ORDER_ALREADY_SHIPPED);
+        }
+        if (order.getStatus() == Order.STATUS_NEW || order.getStatus() == Order.STATUS_PAID) {
+            order.setStatus(Order.STATUS_CANCELLED);
+            updateStatus(order);
+        }
+    }
+>>>
+
+commit 1750 ana
+Add license header to all source files
+
+prepend *.java
+<<<
+/*
+ * Copyright (c) ACME Comercio Ltda. All rights reserved.
+ */
+
+>>>
+
+commit 1700 diego
+wip
+
+replace src/main/java/com/acme/shop/ReportGenerator.java
+<<<
+            double total = 0;
+===
+            writer.write("Generated at " + new Date() + "\n");
+            double total = 0;
+>>>
+
+commit 1650 carla
+corrige imposto para SP (SHOP-34)
+
+replace src/main/java/com/acme/shop/TaxCalculator.java
+<<<
+            rate = amount > 1000 ? 0.18 : 0.12;
+===
+            rate = amount > 1200 ? 0.18 : 0.12;
+>>>
+
+commit 1600 eva
+Add shipping cost calculation
+
+replace src/main/java/com/acme/shop/model/OrderItem.java
+<<<
+    private int quantity;
+===
+    private int quantity;
+    private double weight;
+>>>
+
+replace src/main/java/com/acme/shop/model/OrderItem.java
+<<<
+    public void setQuantity(int quantity) {
+        this.quantity = quantity;
+    }
+}
+===
+    public void setQuantity(int quantity) {
+        this.quantity = quantity;
+    }
+
+    public double getWeight() {
+        return weight;
+    }
+
+    public void setWeight(double weight) {
+        this.weight = weight;
+    }
+}
+>>>
+
+replace src/main/java/com/acme/shop/OrderManager.java
+<<<
+        total = total + TaxCalculator.calculate(order.getCustomer().getState(), total);
+        return total;
+    }
+===
+        total = total + TaxCalculator.calculate(order.getCustomer().getState(), total);
+        total = total + shippingCost(order);
+        return total;
+    }
+
+    public double shippingCost(Order order) {
+        double weight = 0;
+        for (int i = 0; i < order.getItems().size(); i++) {
+            OrderItem item = (OrderItem) order.getItems().get(i);
+            weight = weight + item.getWeight() * item.getQuantity();
+        }
+        String state = order.getCustomer().getState();
+        double cost;
+        if (state.equals("SP") || state.equals("RJ") || state.equals("MG")) {
+            cost = 15;
+        } else if (state.equals("RS") || state.equals("SC") || state.equals("PR")) {
+            cost = 20;
+        } else {
+            cost = 30;
+        }
+        if (weight > 10) {
+            cost = cost + (weight - 10) * 2;
+        }
+        if ("FRETE".equals(order.getCoupon())) {
+            cost = 0;
+        }
+        return cost;
+    }
+>>>
+
+commit 1550 bruno
+fix NPE when customer has no address
+
+replace src/main/java/com/acme/shop/OrderManager.java
+<<<
+        String state = order.getCustomer().getState();
+        double cost;
+===
+        String state = order.getCustomer().getState();
+        if (state == null) {
+            state = "";
+        }
+        double cost;
+>>>
+
+commit 1500 ana2
+add .mailmap for the new company e-mail
+
+add .mailmap
+<<<
+Ana Souza <ana.souza@example.com> Ana S. <ana@corp.example.com>
+>>>
+
+commit 1450 diego
+Add CSV export to the sales report
+
+replace src/main/java/com/acme/shop/ReportGenerator.java
+<<<
+    /** Reads a property of the order by name, so new columns need no code change. */
+===
+    public void csvReport(Date from, Date to, String fileName) throws IOException {
+        List orders = OrderManager.getInstance().findOrdersBetween(from, to);
+        FileWriter writer = new FileWriter(fileName);
+        try {
+            writer.write("number;status;total\n");
+            for (int i = 0; i < orders.size(); i++) {
+                Order order = (Order) orders.get(i);
+                writer.write(order.getNumber() + ";" + value(order, "getStatus") + ";" + value(order, "getTotal") + "\n");
+            }
+        } finally {
+            writer.close();
+        }
+    }
+
+    /** Reads a property of the order by name, so new columns need no code change. */
+>>>
+
+commit 1400 eva
+corrige cálculo do frete para o Norte
+
+replace src/main/java/com/acme/shop/OrderManager.java
+<<<
+        } else {
+            cost = 30;
+        }
+===
+        } else if (state.equals("AM") || state.equals("PA") || state.equals("RR") || state.equals("AP")) {
+            cost = 45;
+        } else {
+            cost = 30;
+        }
+>>>
+
+commit 1350 bruno
+Add payment by bank slip
+
+add src/main/java/com/acme/shop/PaymentService.java
+<<<
+package com.acme.shop;
+
+import com.acme.shop.model.Order;
+
+public interface PaymentService {
+
+    boolean pay(Order order);
+}
+>>>
+
+add src/main/java/com/acme/shop/BankSlipPaymentService.java
+<<<
+package com.acme.shop;
+
+import com.acme.shop.model.Order;
+
+/**
+ * Payment by bank slip: the slip is issued now and paid later.
+ */
+public class BankSlipPaymentService implements PaymentService {
+
+    public boolean pay(Order order) {
+        System.out.println("Bank slip issued for order " + order.getNumber() + ": " + order.getTotal());
+        return true;
+    }
+}
+>>>
+
+replace src/main/java/com/acme/shop/OrderManager.java
+<<<
+    private Random random = new Random();
+===
+    private Random random = new Random();
+
+    private PaymentService paymentService = new BankSlipPaymentService();
+>>>
+
+replace src/main/java/com/acme/shop/OrderManager.java
+<<<
+    public void cancel(Order order) {
+===
+    public boolean pay(Order order) {
+        if (order.getStatus() != Order.STATUS_NEW) {
+            return false;
+        }
+        if (paymentService.pay(order)) {
+            order.setStatus(Order.STATUS_PAID);
+            return true;
+        }
+        return false;
+    }
+
+    public void cancel(Order order) {
+>>>
+
+commit 1300 ana2
+Bugfix SHOP-52: rounding of totals
+
+replace src/main/java/com/acme/shop/OrderManager.java
+<<<
+        total = total + shippingCost(order);
+        return total;
+    }
+===
+        total = total + shippingCost(order);
+        return Math.round(total * 100) / 100.0;
+    }
+>>>
+
+commit 1250 carla
+melhorias
+
+replace src/main/java/com/acme/shop/OrderManager.java
+<<<
+import com.acme.shop.db.ConnectionFactory;
+===
+import com.acme.shop.db.ConnectionFactory;
+import com.acme.shop.db.CustomerDao;
+>>>
+
+replace src/main/java/com/acme/shop/OrderManager.java
+<<<
+            statement = connection.prepareStatement("SELECT id, status, total, created_at FROM orders WHERE number = ?");
+===
+            statement = connection.prepareStatement("SELECT id, status, total, created_at, customer_id FROM orders"
+                    + " WHERE number = ?");
+>>>
+
+replace src/main/java/com/acme/shop/OrderManager.java
+<<<
+                order.setCreatedAt(rs.getTimestamp(4));
+                return order;
+===
+                order.setCreatedAt(rs.getTimestamp(4));
+                order.setCustomer(new CustomerDao().find(rs.getLong(5)));
+                return order;
+>>>
+
+commit 1200 diego
+Add generated status codes
+
+add src/main/java/com/acme/shop/generated/StatusCodes.java
+<<<
+// Generated by statusgen 1.4 from status.xml. DO NOT EDIT.
+package com.acme.shop.generated;
+
+public final class StatusCodes {
+
+    public static final int NEW = 0;
+    public static final int PAID = 1;
+    public static final int SHIPPED = 2;
+    public static final int CANCELLED = 3;
+
+    public static String name(int code) {
+        switch (code) {
+            case NEW: return "NEW";
+            case PAID: return "PAID";
+            case SHIPPED: return "SHIPPED";
+            case CANCELLED: return "CANCELLED";
+            default: return "UNKNOWN";
+        }
+    }
+
+    private StatusCodes() {
+    }
+}
+>>>
+
+commit 1150 eva
+fix: coupon codes are case insensitive
+
+replace src/main/java/com/acme/shop/OrderManager.java
+<<<
+    private double applyCoupon(double total, String coupon) {
+        if (coupon.equals("WELCOME10")) {
+===
+    private double applyCoupon(double total, String code) {
+        String coupon = code.trim().toUpperCase();
+        if (coupon.equals("WELCOME10")) {
+>>>
+
+commit 1100 bruno
+erro na busca de pedidos por período (SHOP-61)
+
+replace src/main/java/com/acme/shop/OrderManager.java
+<<<
+            statement.setTimestamp(2, new Timestamp(to.getTime()));
+===
+            statement.setTimestamp(2, new Timestamp(DateHelper.addDays(to, 1).getTime()));
+>>>
+
+commit 1050 ana2
+update messages
+
+replace src/main/java/com/acme/shop/Messages.java
+<<<
+"Pedido não encontrado"
+===
+"Pedido não encontrado. Verifique o número."
+>>>
+
+commit 1000 diego
+hotfix SHOP-66 report crash on empty period
+
+replace src/main/java/com/acme/shop/ReportGenerator.java
+<<<
+        FileWriter writer = new FileWriter(fileName);
+        try {
+            writer.write("Sales report "
+===
+        if (orders == null || orders.isEmpty()) {
+            return;
+        }
+        FileWriter writer = new FileWriter(fileName);
+        try {
+            writer.write("Sales report "
+>>>
+
+commit 950 eva
+Add order status history
+
+replace src/main/java/com/acme/shop/OrderManager.java
+<<<
+            order.setStatus(Order.STATUS_PAID);
+            return true;
+===
+            order.setStatus(Order.STATUS_PAID);
+            logStatusChange(order, "paid");
+            return true;
+>>>
+
+replace src/main/java/com/acme/shop/OrderManager.java
+<<<
+            order.setStatus(Order.STATUS_CANCELLED);
+            updateStatus(order);
+===
+            order.setStatus(Order.STATUS_CANCELLED);
+            updateStatus(order);
+            logStatusChange(order, "cancelled");
+>>>
+
+replace src/main/java/com/acme/shop/OrderManager.java
+<<<
+    private void close(PreparedStatement statement, Connection connection) {
+===
+    private void logStatusChange(Order order, String change) {
+        Connection connection = null;
+        PreparedStatement statement = null;
+        try {
+            connection = ConnectionFactory.getConnection();
+            statement = connection.prepareStatement("INSERT INTO order_history (number, change, changed_at)"
+                    + " VALUES (?, ?, ?)");
+            statement.setString(1, order.getNumber());
+            statement.setString(2, change);
+            statement.setTimestamp(3, new Timestamp(new Date().getTime()));
+            statement.executeUpdate();
+        } catch (SQLException e) {
+            System.out.println("Error logging status of order " + order.getNumber() + ": " + e.getMessage());
+        } finally {
+            close(statement, connection);
+        }
+    }
+
+    private void close(PreparedStatement statement, Connection connection) {
+>>>
+
+commit 900 bruno
+fix status not saved after payment
+
+replace src/main/java/com/acme/shop/OrderManager.java
+<<<
+            logStatusChange(order, "paid");
+===
+            updateStatus(order);
+            logStatusChange(order, "paid");
+>>>
+
+commit 850 ana2
+Reorganize packages (util is now common) and update the company name
+
+rename src/main/java/com/acme/shop/util/DateHelper.java -> src/main/java/com/acme/shop/common/DateUtils.java
+
+replace-all *.java
+<<<
+com.acme.shop.util
+===
+com.acme.shop.common
+>>>
+
+replace-all *.java
+<<<
+DateHelper
+===
+DateUtils
+>>>
+
+replace-all *.java
+<<<
+ACME Comercio Ltda.
+===
+ACME Comercio e Servicos Ltda.
+>>>
+
+commit 800 carla
+Add discount for loyal customers
+
+replace src/main/java/com/acme/shop/model/Customer.java
+<<<
+    private String state;
+===
+    private String state;
+    private boolean loyal;
+>>>
+
+replace src/main/java/com/acme/shop/model/Customer.java
+<<<
+    public void setState(String state) {
+        this.state = state;
+    }
+}
+===
+    public void setState(String state) {
+        this.state = state;
+    }
+
+    public boolean isLoyal() {
+        return loyal;
+    }
+
+    public void setLoyal(boolean loyal) {
+        this.loyal = loyal;
+    }
+}
+>>>
+
+replace src/main/java/com/acme/shop/OrderManager.java
+<<<
+        if (total >= 500) {
+            total = total - total * 0.1;
+        }
+===
+        if (total >= 500) {
+            total = total - total * 0.1;
+        }
+        if (order.getCustomer().isLoyal()) {
+            total = total - total * 0.05;
+        }
+>>>
+
+commit 760 eva
+corrige desconto duplicado para clientes fiéis
+
+replace src/main/java/com/acme/shop/OrderManager.java
+<<<
+        if (order.getCustomer().isLoyal()) {
+===
+        else if (order.getCustomer().isLoyal()) {
+>>>
+
+commit 700 diego
+misc changes
+
+replace src/main/java/com/acme/shop/common/DateUtils.java
+<<<
+import java.text.SimpleDateFormat;
+===
+import java.text.ParseException;
+import java.text.SimpleDateFormat;
+>>>
+
+replace src/main/java/com/acme/shop/common/DateUtils.java
+<<<
+    public static Date addDays(Date date, int days) {
+===
+    public static Date parse(String text, String pattern) {
+        try {
+            return new SimpleDateFormat(pattern).parse(text);
+        } catch (ParseException e) {
+            return null;
+        }
+    }
+
+    public static Date addDays(Date date, int days) {
+>>>
+
+commit 650 bruno
+fix timezone in order date (SHOP-80)
+
+replace src/main/java/com/acme/shop/common/DateUtils.java
+<<<
+import java.util.Date;
+===
+import java.util.Date;
+import java.util.TimeZone;
+>>>
+
+replace src/main/java/com/acme/shop/common/DateUtils.java
+<<<
+        SimpleDateFormat format = new SimpleDateFormat(pattern);
+        return format.format(date);
+===
+        SimpleDateFormat format = new SimpleDateFormat(pattern);
+        format.setTimeZone(TimeZone.getTimeZone("America/Sao_Paulo"));
+        return format.format(date);
+>>>
+
+commit 600 ana2
+update messages
+
+replace src/main/java/com/acme/shop/Messages.java
+<<<
+"Cupom inválido"
+===
+"Cupom inválido ou expirado"
+>>>
+
+commit 550 eva
+Add express shipping
+
+replace src/main/java/com/acme/shop/model/Order.java
+<<<
+    private String coupon;
+===
+    private String coupon;
+    private boolean express;
+>>>
+
+replace src/main/java/com/acme/shop/model/Order.java
+<<<
+    public void setCoupon(String coupon) {
+        this.coupon = coupon;
+    }
+}
+===
+    public void setCoupon(String coupon) {
+        this.coupon = coupon;
+    }
+
+    public boolean isExpress() {
+        return express;
+    }
+
+    public void setExpress(boolean express) {
+        this.express = express;
+    }
+}
+>>>
+
+replace src/main/java/com/acme/shop/OrderManager.java
+<<<
+        if ("FRETE".equals(order.getCoupon())) {
+===
+        if (order.isExpress()) {
+            cost = cost * 2 + 10;
+        }
+        if ("FRETE".equals(order.getCoupon())) {
+>>>
+
+commit 500 bruno
+hotfix: frete expresso cobrado em dobro
+
+replace src/main/java/com/acme/shop/OrderManager.java
+<<<
+            cost = cost * 2 + 10;
+===
+            cost = cost + 25;
+>>>
+
+commit 450 carla
+erro de arredondamento no total (SHOP-95)
+
+replace src/main/java/com/acme/shop/OrderManager.java
+<<<
+            total = total - total * 0.1;
+===
+            total = Math.round((total - total * 0.1) * 100) / 100.0;
+>>>
+
+commit 400 diego
+Add report by customer
+
+replace src/main/java/com/acme/shop/OrderManager.java
+<<<
+    public boolean pay(Order order) {
+===
+    public List findOrdersByCustomer(long customerId) {
+        List orders = new Vector();
+        Connection connection = null;
+        PreparedStatement statement = null;
+        try {
+            connection = ConnectionFactory.getConnection();
+            statement = connection.prepareStatement("SELECT number FROM orders WHERE customer_id = ?");
+            statement.setLong(1, customerId);
+            ResultSet rs = statement.executeQuery();
+            while (rs.next()) {
+                orders.add(findOrder(rs.getString(1)));
+            }
+        } catch (SQLException e) {
+            System.out.println("Error listing orders of customer " + customerId + ": " + e.getMessage());
+        } finally {
+            close(statement, connection);
+        }
+        return orders;
+    }
+
+    public boolean pay(Order order) {
+>>>
+
+replace src/main/java/com/acme/shop/ReportGenerator.java
+<<<
+    /** Reads a property of the order by name, so new columns need no code change. */
+===
+    public void customerReport(long customerId, String fileName) throws IOException {
+        List orders = OrderManager.getInstance().findOrdersByCustomer(customerId);
+        FileWriter writer = new FileWriter(fileName);
+        try {
+            for (int i = 0; i < orders.size(); i++) {
+                Order order = (Order) orders.get(i);
+                writer.write(order.getNumber() + ";" + DateUtils.format(order.getCreatedAt(), "dd/MM/yyyy") + ";"
+                        + value(order, "getTotal") + "\n");
+            }
+        } finally {
+            writer.close();
+        }
+    }
+
+    /** Reads a property of the order by name, so new columns need no code change. */
+>>>
+
+commit 350 eva
+fix coupon expiration check
+
+replace src/main/java/com/acme/shop/OrderManager.java
+<<<
+        } else if (coupon.equals("BLACKFRIDAY")) {
+            return total * 0.7;
+===
+        } else if (coupon.equals("BLACKFRIDAY")) {
+            if (!DateUtils.format(new Date(), "MM").equals("11")) {
+                System.out.println(Messages.COUPON_INVALID + ": " + coupon);
+                return total;
+            }
+            return total * 0.7;
+>>>
+
+commit 300 ana2
+ajustes
+
+replace src/main/java/com/acme/shop/Messages.java
+<<<
+    public static final String ORDER_ALREADY_SHIPPED = "Pedido já enviado não pode ser cancelado";
+===
+    public static final String ORDER_ALREADY_SHIPPED = "Pedido já enviado não pode ser cancelado";
+    public static final String ORDER_NOT_PAYABLE = "Pedido não pode ser pago";
+>>>
+
+replace src/main/java/com/acme/shop/OrderManager.java
+<<<
+        if (order.getStatus() != Order.STATUS_NEW) {
+            return false;
+        }
+===
+        if (order.getStatus() != Order.STATUS_NEW) {
+            System.out.println(Messages.ORDER_NOT_PAYABLE + ": " + order.getNumber());
+            return false;
+        }
+>>>
+
+commit 250 bruno
+corrige NPE no cancelamento sem pedido (SHOP-110)
+
+replace src/main/java/com/acme/shop/OrderManager.java
+<<<
+    public void cancel(Order order) {
+        if (order.getStatus() == Order.STATUS_SHIPPED) {
+===
+    public void cancel(Order order) {
+        if (order == null) {
+            throw new IllegalArgumentException(Messages.ORDER_NOT_FOUND);
+        }
+        if (order.getStatus() == Order.STATUS_SHIPPED) {
+>>>
+
+commit 200 eva
+Add gift wrapping option
+
+replace src/main/java/com/acme/shop/model/Order.java
+<<<
+    private boolean express;
+===
+    private boolean express;
+    private boolean giftWrap;
+>>>
+
+replace src/main/java/com/acme/shop/model/Order.java
+<<<
+    public void setExpress(boolean express) {
+        this.express = express;
+    }
+}
+===
+    public void setExpress(boolean express) {
+        this.express = express;
+    }
+
+    public boolean isGiftWrap() {
+        return giftWrap;
+    }
+
+    public void setGiftWrap(boolean giftWrap) {
+        this.giftWrap = giftWrap;
+    }
+}
+>>>
+
+replace src/main/java/com/acme/shop/OrderManager.java
+<<<
+        total = total + shippingCost(order);
+===
+        if (order.isGiftWrap()) {
+            total = total + 5;
+        }
+        total = total + shippingCost(order);
+>>>
+
+commit 150 carla
+fix gift wrapping price for multiple items
+
+replace src/main/java/com/acme/shop/OrderManager.java
+<<<
+            total = total + 5;
+===
+            total = total + 5 * order.getItems().size();
+>>>
+
+commit 100 diego
+update report header
+
+replace src/main/java/com/acme/shop/ReportGenerator.java
+<<<
+"Sales report "
+===
+"ACME sales report "
+>>>
+
+commit 60 bruno
+fix: order number collision under load (SHOP-131)
+
+replace src/main/java/com/acme/shop/OrderManager.java
+<<<
+random.nextInt(10000)
+===
+random.nextInt(1000000)
+>>>
+
+commit 30 ana2
+update messages
+
+replace src/main/java/com/acme/shop/Messages.java
+<<<
+"Cliente é obrigatório"
+===
+"Informe o cliente do pedido"
+>>>
+
+commit 14 eva
+corrige total quando cupom e frete expresso (SHOP-140)
+
+replace src/main/java/com/acme/shop/OrderManager.java
+<<<
+        if ("FRETE".equals(order.getCoupon())) {
+            cost = 0;
+        }
+===
+        if ("FRETE".equals(order.getCoupon())) {
+            cost = order.isExpress() ? 25 : 0;
+        }
+>>>

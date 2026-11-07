@@ -69,7 +69,7 @@ class ArchaeologistCliTests {
     void helpListsTheCommandsAndExitCodes() {
         assertThat(run("--help")).isEqualTo(0);
         assertThat(out.toString())
-                .contains("Usage: archaeologist", "hotspots", "run", "scout", "help", "--stacktrace")
+                .contains("Usage: archaeologist", "hotspots", "run", "scout", "sample", "help", "--stacktrace")
                 .contains("Runs 100%").doesNotContain("%%")
                 .contains("Exit codes:", "Invalid command line", "Invalid configuration");
     }
@@ -189,6 +189,33 @@ class ArchaeologistCliTests {
         run("run", tempDir.resolve("missing").toString());
 
         assertThat(out.toString()).isEmpty();
+    }
+
+    @Test
+    void sampleCreatesARepositoryAndSaysHowToTryIt() {
+        Path folder = tempDir.resolve("legacy-shop");
+
+        assertThat(run("sample", folder.toString())).isEqualTo(ExitCode.OK.code());
+        assertThat(out.toString()).contains("Created a sample legacy repository in " + folder + ": 50 commits",
+                "Try it: archaeologist hotspots " + folder);
+        assertThat(folder.resolve(".git")).isDirectory();
+        assertThat(err.toString()).isEmpty();
+    }
+
+    @Test
+    void sampleRefusesAFolderWithFiles() throws IOException {
+        Path folder = Files.createDirectory(tempDir.resolve("mine"));
+        Files.writeString(folder.resolve("notes.txt"), "keep me");
+
+        assertThat(run("sample", folder.toString())).isEqualTo(ExitCode.FAILURE.code());
+        assertThat(err.toString()).contains("Error: Not an empty folder: " + folder);
+        assertThat(folder.resolve("notes.txt")).hasContent("keep me");
+    }
+
+    @Test
+    void sampleNeedsAFolder() {
+        assertThat(run("sample")).isEqualTo(ExitCode.USAGE.code());
+        assertThat(err.toString()).contains("<folder>");
     }
 
     @Test

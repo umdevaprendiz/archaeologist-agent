@@ -119,11 +119,33 @@ java -jar target/archaeologist.jar --help
 java -jar target/archaeologist.jar hotspots <repo>   # rank the riskiest classes (read-only)
 java -jar target/archaeologist.jar run <repo>        # full cycle, on archaeologist/* branches
 java -jar target/archaeologist.jar scout             # detect the hardware and pick the model
+java -jar target/archaeologist.jar sample <folder>   # create a small legacy repository to try it on
 ```
 
 `archaeologist help <command>` (or `<command> --help`) shows the details of each command. Add `--stacktrace` to see the full details of an unexpected error. Those details come straight from Java and may include local paths: check them before you share them.
 
-The agents behind the commands are not implemented yet: for now, `hotspots` and `run` check that `<repo>` is a Git repository and create the run's output folder and audit log, and every command then stops with a "not implemented yet" message.
+The agents behind the commands are not implemented yet: for now, `hotspots` and `run` check that `<repo>` is a Git repository and create the run's output folder and audit log, and every command except `sample` then stops with a "not implemented yet" message.
+
+### Try it on the sample repository
+
+No legacy project at hand? The `sample` command creates one: a small order system in the style of Java 6/7, with six years of Git history.
+
+```bash
+java -jar target/archaeologist.jar sample legacy-shop
+java -jar target/archaeologist.jar hotspots legacy-shop
+```
+
+The folder must be new or empty. The history is scripted (in [`src/main/resources/sample/legacy-shop.history`](src/main/resources/sample/legacy-shop.history)) so that the right answer is known:
+
+| File | What the history makes of it |
+|---|---|
+| `OrderManager.java` | **The hotspot.** A god class (JDBC, `Date`, `Random`, a static singleton) changed by every author, with most of the bug fixes |
+| `TaxCalculator.java` | Complex but stable: written once, fixed once |
+| `Messages.java` | Simple but changed often; encoded in ISO-8859-1, as old projects often were |
+| `common/DateUtils.java` | Renamed from `util/DateHelper.java`, with changes before and after |
+| `ReportGenerator.java` | Reflection and file I/O, with Windows (CRLF) line endings |
+
+It also has two bulk commits that touch every source file, bug fixes in English and Portuguese with issue keys (`SHOP-123`), vague messages (`ajustes`, `wip`), an interface, a generated class, one JUnit 4 test and a `.mailmap`. Its five authors are fictional and use addresses at reserved example domains (`example.com`). Git creates it without your configuration: your name, e-mail and Git hooks never end up in it. The same day always gives the same commits.
 
 ### Output
 
@@ -219,6 +241,7 @@ archaeologist-agent/
 │   │   ├── config/                  # typed settings and the model catalog
 │   │   ├── run/                     # run ids and output folders
 │   │   ├── audit/                   # the audit log of each run
+│   │   ├── sample/                  # the sample legacy repository
 │   │   ├── scout/
 │   │   ├── excavator/
 │   │   ├── cartographer/
@@ -230,7 +253,8 @@ archaeologist-agent/
 │   │   ├── inference/
 │   │   └── orchestrator/
 │   ├── main/resources/
-│   │   └── application.yml          # default settings
+│   │   ├── application.yml          # default settings
+│   │   └── sample/legacy-shop.history  # scripted history of the sample repository
 │   └── test/java/com/archaeologist/
 ├── LICENSE                          # Apache License 2.0
 ├── mvnw, mvnw.cmd                   # Maven Wrapper

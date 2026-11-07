@@ -20,7 +20,7 @@ import picocli.CommandLine.Spec;
         versionProvider = VersionProvider.class,
         description = "Finds the riskiest code of a legacy Java system, modernizes it on separate branches "
                 + "and proves with tests that its behavior did not change. Runs 100%% locally.",
-        subcommands = {HotspotsCommand.class, RunCommand.class, ScoutCommand.class, HelpCommand.class})
+        subcommands = {HotspotsCommand.class, RunCommand.class, ScoutCommand.class, SampleCommand.class, HelpCommand.class})
 public class ArchaeologistCommand implements Callable<Integer> {
 
     static final String STACKTRACE_OPTION = "--stacktrace";

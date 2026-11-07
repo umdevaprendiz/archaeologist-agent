@@ -9,6 +9,7 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
@@ -89,10 +90,16 @@ class AgentConductTests {
             new Scenario("unknown-setting", List.of("hotspots", "legacy-repo"),
                     Map.of("ARCHAEOLOGIST_OLLAMA_TOKEN", SETTING_SECRET), 4, "is not a known setting", false),
             new Scenario("blocked-output-folder", List.of("hotspots", "legacy-repo"),
-                    Map.of("ARCHAEOLOGIST_OUTPUT_FOLDER", "blocked"), 1, "a file with that name is in the way", false));
+                    Map.of("ARCHAEOLOGIST_OUTPUT_FOLDER", "blocked"), 1, "a file with that name is in the way", false),
+            new Scenario("sample", List.of("sample", "legacy-shop"), Map.of(), 0,
+                    "Created a sample legacy repository in legacy-shop", false));
 
-    /** Each scenario's output folder, relative to the fake home: the only place the agent may write. */
-    private static final Pattern OUTPUT_FOLDER = Pattern.compile("projects/[^/]+/archaeologist-output(/.*)?");
+    /**
+     * The only places the agent may write, relative to the fake home: each scenario's output folder, and
+     * the folder the sample command was asked to create.
+     */
+    private static final Pattern OUTPUT_FOLDER = Pattern.compile(
+            "projects/[^/]+/archaeologist-output(/.*)?|projects/sample/legacy-shop(/.*)?");
 
     @TempDir
     static Path sandbox;
@@ -155,8 +162,8 @@ class AgentConductTests {
         assertThat(result.stdout() + result.stderr()).as("console of '%s'%n%s", name, console)
                 .contains(result.scenario().expectedText());
         if (result.scenario().startsRun()) {
-            assertThat(filesIn(outputFolder(result))).as("files written by '%s'", name)
-                    .anyMatch(file -> file.endsWith("audit.jsonl"));
+            assertThat(filesIn(outputFolder(result)).stream().map(file -> file.getFileName().toString()))
+                    .as("files written by '%s'", name).contains("audit.jsonl");
         }
     }
 
@@ -209,6 +216,44 @@ class AgentConductTests {
         after.keySet().stream().filter(path -> !homeBefore.containsKey(path)).forEach(path -> changes.add("added " + path));
 
         assertThat(changes).as("changes in the fake home folder, outside the output folders").isEmpty();
+    }
+
+    /**
+     * The sample repository holds only its scripted content: none of the user's data, and none of their
+     * Git setup (identity, hooks, templates). Its fictional authors use reserved example domains.
+     */
+    @Test
+    void sampleRepositoryHoldsNothingOfTheUser() throws IOException, InterruptedException {
+        Path sample = RESULTS.get("sample").workspace().resolve("legacy-shop");
+        SensitiveDataScanner scanner = scannerOfEverythingPrivate(SensitiveDataScanner.builder().allowReservedEmails());
+
+        List<Finding> findings = new ArrayList<>();
+        try (Stream<Path> files = Files.walk(sample)) {
+            for (Path file : files.filter(Files::isRegularFile).toList()) {
+                String relative = slashes(sample.relativize(file));
+                if (!relative.startsWith(".git/")) {
+                    findings.addAll(scanner.scan(relative, new String(Files.readAllBytes(file), UTF_8)));
+                }
+            }
+        }
+        findings.addAll(scanner.scan("commit identities and messages",
+                gitOutput(sample, "log", "--format=%an <%ae>%n%cn <%ce>%n%B")));
+
+        assertThat(findings).as("private data in the sample repository").isEmpty();
+        assertThat(gitOutput(sample, "branch", "--show-current").strip()).isEqualTo("main");
+        // Names only: a failure report must not show where the test ran
+        assertThat(filesIn(sample.resolve(".git").resolve("hooks")).stream().map(file -> file.getFileName().toString()))
+                .as("hooks in the sample").isEmpty();
+    }
+
+    private static String gitOutput(Path repo, String... args) throws IOException, InterruptedException {
+        List<String> command = new ArrayList<>(List.of("git", "-c", "color.ui=false", "-C", repo.toString()));
+        command.addAll(List.of(args));
+        Process git = new ProcessBuilder(command).redirectError(ProcessBuilder.Redirect.DISCARD).start();
+        String output = new String(git.getInputStream().readAllBytes(), UTF_8);
+        assertThat(git.waitFor(1, TimeUnit.MINUTES)).isTrue();
+        assertThat(git.exitValue()).as("git %s", args[0]).isZero();
+        return output;
     }
 
     private static Result run(Scenario scenario, Path argFile, Path temp) throws IOException, InterruptedException {
@@ -281,16 +326,39 @@ class AgentConductTests {
         write(".aws/credentials", "[default]\naws_access_key_id = " + AWS_KEY_ID + "\naws_secret_access_key = "
                 + AWS_SECRET + "\n");
         write(".git-credentials", "https://" + USER + ":" + GIT_PASSWORD + "@git.example.invalid\n");
-        write(".gitconfig", "[user]\n\tname = Canary User\n\temail = " + GIT_EMAIL + "\n");
+        plantGitSetup();
         write(".docker/config.json", "{\"auths\":{\"registry.example.invalid\":{\"auth\":\"" + DOCKER_AUTH + "\"}}}\n");
         write(".npmrc", "//registry.example.invalid/:_authToken=" + NPM_TOKEN + "\n");
         write(".netrc", "machine git.example.invalid login " + USER + " password " + NETRC_PASSWORD + "\n");
     }
 
-    private static void write(String relative, String content) throws IOException {
+    /**
+     * A Git setup the agent must never use: the user's identity, global hooks and templates that leave a
+     * trace when they run, another default branch, and mandatory signing.
+     */
+    private static void plantGitSetup() throws IOException {
+        String folder = home.toString().replace('\\', '/');
+        write(".gitconfig", "[user]\n\tname = Canary User\n\temail = " + GIT_EMAIL + "\n"
+                + "[core]\n\thooksPath = " + folder + "/.githooks\n"
+                + "[init]\n\ttemplateDir = " + folder + "/.git-templates\n\tdefaultBranch = canary-branch\n"
+                + "[commit]\n\tgpgsign = true\n");
+        String hook = "#!/bin/sh\necho ran >> \"" + folder + "/hook-ran.txt\"\n";
+        for (String name : List.of("pre-commit", "post-commit", "post-checkout", "reference-transaction")) {
+            makeExecutable(write(".githooks/" + name, hook));
+            makeExecutable(write(".git-templates/hooks/" + name, hook));
+        }
+    }
+
+    private static void makeExecutable(Path file) throws IOException {
+        if (file.getFileSystem().supportedFileAttributeViews().contains("posix")) {
+            Files.setPosixFilePermissions(file, PosixFilePermissions.fromString("rwxr-xr-x"));
+        }
+    }
+
+    private static Path write(String relative, String content) throws IOException {
         Path file = home.resolve(relative);
         Files.createDirectories(file.getParent());
-        Files.writeString(file, content, UTF_8);
+        return Files.writeString(file, content, UTF_8);
     }
 
     /** A Git repository, a folder that is not one, and a file where an output folder could go. */
@@ -306,7 +374,11 @@ class AgentConductTests {
     }
 
     private static SensitiveDataScanner scannerOfEverythingPrivate() {
-        SensitiveDataScanner.Builder builder = SensitiveDataScanner.builder()
+        return scannerOfEverythingPrivate(SensitiveDataScanner.builder());
+    }
+
+    private static SensitiveDataScanner scannerOfEverythingPrivate(SensitiveDataScanner.Builder builder) {
+        builder
                 .value("the fake user name", USER)
                 .path("the fake home folder", home)
                 .path("the test's temporary folder", sandbox)
