@@ -1,6 +1,6 @@
 package com.archaeologist.cli;
 
-import com.archaeologist.run.RunFolders;
+import java.nio.file.Path;
 import java.util.concurrent.Callable;
 import org.springframework.beans.factory.config.ConfigurableBeanFactory;
 import org.springframework.context.annotation.Scope;
@@ -21,7 +21,7 @@ import picocli.CommandLine.Spec;
                 + "Read-only: the repository is never changed.")
 public class HotspotsCommand implements Callable<Integer> {
 
-    private final RunFolders runFolders;
+    private final RunLauncher runLauncher;
 
     @Spec
     private CommandSpec spec;
@@ -29,14 +29,15 @@ public class HotspotsCommand implements Callable<Integer> {
     @Mixin
     private RepositoryParameter repository;
 
-    public HotspotsCommand(RunFolders runFolders) {
-        this.runFolders = runFolders;
+    public HotspotsCommand(RunLauncher runLauncher) {
+        this.runLauncher = runLauncher;
     }
 
     @Override
     public Integer call() {
-        repository.requireGitRepository();
-        RunStarter.start(runFolders, spec.commandLine().getOut());
-        throw CliException.notImplemented("hotspots", "feature PRI-02");
+        Path repo = repository.requireGitRepository();
+        return runLauncher.launch(spec.name(), repo, spec.commandLine().getOut(), run -> {
+            throw CliException.notImplemented(spec.name(), "feature PRI-02");
+        });
     }
 }

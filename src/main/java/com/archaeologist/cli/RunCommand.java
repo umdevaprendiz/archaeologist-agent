@@ -1,6 +1,6 @@
 package com.archaeologist.cli;
 
-import com.archaeologist.run.RunFolders;
+import java.nio.file.Path;
 import java.util.concurrent.Callable;
 import org.springframework.beans.factory.config.ConfigurableBeanFactory;
 import org.springframework.context.annotation.Scope;
@@ -22,7 +22,7 @@ import picocli.CommandLine.Spec;
                 + "verifies it. The main branch is never touched.")
 public class RunCommand implements Callable<Integer> {
 
-    private final RunFolders runFolders;
+    private final RunLauncher runLauncher;
 
     @Spec
     private CommandSpec spec;
@@ -30,14 +30,15 @@ public class RunCommand implements Callable<Integer> {
     @Mixin
     private RepositoryParameter repository;
 
-    public RunCommand(RunFolders runFolders) {
-        this.runFolders = runFolders;
+    public RunCommand(RunLauncher runLauncher) {
+        this.runLauncher = runLauncher;
     }
 
     @Override
     public Integer call() {
-        repository.requireGitRepository();
-        RunStarter.start(runFolders, spec.commandLine().getOut());
-        throw CliException.notImplemented("run", "feature ORC-04");
+        Path repo = repository.requireGitRepository();
+        return runLauncher.launch(spec.name(), repo, spec.commandLine().getOut(), run -> {
+            throw CliException.notImplemented(spec.name(), "feature ORC-04");
+        });
     }
 }

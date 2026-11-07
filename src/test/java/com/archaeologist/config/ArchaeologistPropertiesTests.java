@@ -59,6 +59,15 @@ class ArchaeologistPropertiesTests {
     }
 
     @Test
+    void decisionSummaryListsTheSettingsButNoPath() {
+        runner.withPropertyValues("archaeologist.output.folder=private-reports",
+                "archaeologist.model-catalog=" + Path.of("config", "models.yaml")).run(context -> assertThat(
+                context.getBean(ArchaeologistProperties.class).decisionSummary()).isEqualTo(
+                "history.years=5, risk-weights.fixes=1.0, risk-weights.authors=0.5, retry.max-attempts=3, "
+                        + "quality.min-line-coverage-percent=80, quality.min-mutation-score-percent=60"));
+    }
+
+    @Test
     void bundledModelCatalogIsLoadedByDefault() {
         runner.run(context -> assertThat(context.getBean(ModelCatalog.class).profiles())
                 .containsOnlyKeys(MachineProfile.values()));

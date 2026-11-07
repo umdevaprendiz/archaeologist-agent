@@ -1,5 +1,6 @@
 package com.archaeologist.cli;
 
+import static java.nio.charset.StandardCharsets.UTF_8;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.io.IOException;
@@ -7,6 +8,7 @@ import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import org.junit.jupiter.api.Test;
@@ -19,6 +21,8 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import picocli.CommandLine;
 import picocli.CommandLine.Help.Ansi;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.json.JsonMapper;
 
 @SpringBootTest
 class ArchaeologistCliTests {
@@ -154,6 +158,30 @@ class ArchaeologistCliTests {
         Matcher started = RUN_STARTED.matcher(out.toString().strip());
         assertThat(started.matches()).as("run started: %s", out).isTrue();
         assertThat(Path.of(started.group(2))).isEqualTo(outputFolder().resolve(started.group(1))).isDirectory();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"hotspots", "run"})
+    void runKeepsAnAuditLogWithoutLocalPaths(String command) throws IOException {
+        Path repo = gitRepository();
+        run(command, repo.toAbsolutePath().toString());
+
+        Matcher started = RUN_STARTED.matcher(out.toString().strip());
+        assertThat(started.matches()).as("run started: %s", out).isTrue();
+        List<JsonNode> events = Files.readAllLines(Path.of(started.group(2)).resolve("audit.jsonl"), UTF_8).stream()
+                .map(JsonMapper.shared()::readTree).toList();
+        assertThat(events).extracting(event -> event.get("action").asString())
+                .containsExactly("run-started", "run-finished");
+        assertThat(events.get(0).get("input").asString()).startsWith(command + " on repository 'repo'; ");
+        assertThat(events.get(1).get("outcome").asString())
+                .startsWith("failed (exit code 1): The '" + command + "' command is not implemented yet");
+
+        String home = System.getProperty("user.home");
+        assertThat(events).allSatisfy(event -> event.properties().forEach(field -> assertThat(field.getValue().asString())
+                .doesNotContainIgnoringCase(repo.toAbsolutePath().toString())
+                .doesNotContainIgnoringCase(outputParent.toAbsolutePath().toString())
+                .doesNotContainIgnoringCase(home)
+                .doesNotContainIgnoringCase(home.replace('\\', '/'))));
     }
 
     @Test

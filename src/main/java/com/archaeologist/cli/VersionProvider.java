@@ -20,8 +20,20 @@ public class VersionProvider implements IVersionProvider {
 
     @Override
     public String[] getVersion() {
+        return new String[] {product(), java()};
+    }
+
+    /** On one line, for the audit log: {@code Code Archaeologist 0.1.0 on Java 21.0.5+11-LTS}. */
+    public String summary() {
+        return product() + " on " + java();
+    }
+
+    private String product() {
         BuildProperties build = buildProperties.getIfAvailable();
-        String version = build != null ? build.getVersion() : "development build";
-        return new String[] {"Code Archaeologist " + version, "Java " + Runtime.version()};
+        return "Code Archaeologist " + (build != null ? build.getVersion() : "development build");
+    }
+
+    private static String java() {
+        return "Java " + Runtime.version();
     }
 }

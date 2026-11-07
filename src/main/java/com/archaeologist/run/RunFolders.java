@@ -2,9 +2,7 @@ package com.archaeologist.run;
 
 import com.archaeologist.config.ArchaeologistProperties;
 import java.io.IOException;
-import java.nio.file.AccessDeniedException;
 import java.nio.file.FileAlreadyExistsException;
-import java.nio.file.FileSystemException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
@@ -96,20 +94,6 @@ public class RunFolders {
     }
 
     private static RunFolderException failure(String what, IOException ex) {
-        return new RunFolderException("Cannot create " + what + ": " + reason(ex), ex);
-    }
-
-    /** Why the file system refused. Never its file names: Java may have expanded them to absolute paths. */
-    private static String reason(IOException ex) {
-        if (ex instanceof AccessDeniedException) {
-            return "permission denied";
-        }
-        if (ex instanceof FileAlreadyExistsException) {
-            return "a file with that name is in the way";
-        }
-        if (ex instanceof FileSystemException fileSystem && fileSystem.getReason() != null) {
-            return fileSystem.getReason();
-        }
-        return ex.getClass().getSimpleName();
+        return new RunFolderException("Cannot create " + what + ": " + FileErrors.reason(ex), ex);
     }
 }

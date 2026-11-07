@@ -35,6 +35,20 @@ public record ArchaeologistProperties(
 
     private static final String PERCENT = "must be between 0 and 100";
 
+    /**
+     * The settings that steer the agents' decisions, on one line for the audit log, e.g.
+     * {@code history.years=5, risk-weights.fixes=1.0, ...}. Path settings are left out: they can show the
+     * user's folders. A new setting that changes a decision belongs here.
+     */
+    public String decisionSummary() {
+        return "history.years=" + history.years()
+                + ", risk-weights.fixes=" + riskWeights.fixes()
+                + ", risk-weights.authors=" + riskWeights.authors()
+                + ", retry.max-attempts=" + retry.maxAttempts()
+                + ", quality.min-line-coverage-percent=" + quality.minLineCoveragePercent()
+                + ", quality.min-mutation-score-percent=" + quality.minMutationScorePercent();
+    }
+
     /** @param years how many years back the Excavator reads the Git history */
     public record History(@Min(value = 1, message = "must be at least 1") int years) {
     }

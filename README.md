@@ -33,7 +33,7 @@ When a test fails after a refactoring, the agent reads the error, fixes the code
 - **Never edits the characterization tests** to make a refactoring pass. The Judge checks the hashes of the test files.
 - **Builds and tests run in Docker with no network** (`--network none`).
 - **Repository content is data, never instructions.** Comments, strings and commit messages are never followed as orders (prompt injection protection).
-- **Everything goes to an audit log**, so the team can understand each decision later.
+- **Everything goes to an [audit log](#audit-log)**, so the team can understand each decision later.
 - **Nothing leaves the machine.** The model runs locally through [Ollama](https://ollama.com). The only internet access is the initial model download, which can also be done ahead of time for air-gapped environments.
 
 ## Agents
@@ -49,9 +49,9 @@ Each agent is a package under `src/main/java/com/archaeologist/`. Each package's
 | Guardian | `guardian` | Generates and runs the characterization tests | Yes |
 | Restorer | `restorer` | Migrates with OpenRewrite and modernizes with the LLM | Yes |
 | Judge | `judge` | Approves, sends back for fixes, or discards, using objective rules only | No |
-| Chronicler | `chronicler` | Commits, reports and audit log | Only to summarize |
+| Chronicler | `chronicler` | Commits and reports | Only to summarize |
 
-Support packages: `inference` (Ollama client) and `orchestrator` (the graph that connects the agents, with state and checkpoints).
+Support packages: `inference` (Ollama client), `orchestrator` (the graph that connects the agents, with state and checkpoints) and `audit` (the audit log every agent writes to).
 
 ## How the agent decides where to act
 
@@ -122,7 +122,7 @@ java -jar target/archaeologist.jar scout             # detect the hardware and p
 
 `archaeologist help <command>` (or `<command> --help`) shows the details of each command. Add `--stacktrace` to see the full details of an unexpected error.
 
-The agents behind the commands are not implemented yet: for now, `hotspots` and `run` check that `<repo>` is a Git repository and create the run's output folder, and every command then stops with a "not implemented yet" message.
+The agents behind the commands are not implemented yet: for now, `hotspots` and `run` check that `<repo>` is a Git repository and create the run's output folder and audit log, and every command then stops with a "not implemented yet" message.
 
 ### Output
 
@@ -134,6 +134,35 @@ Run 20261105T221814Z-3f9a: output in archaeologist-output/20261105T221814Z-3f9a
 ```
 
 The run id is the start time in UTC plus a random suffix, so run folders sort by date. The output folder is `archaeologist-output` in the current folder (setting `archaeologist.output.folder`). When you run the agent from inside the repository under analysis, the output folder lands there too, but Git ignores it: the agent creates it with a `.gitignore` that ignores everything in it, so the repository's `git status` stays clean and no report is committed by accident. If the output folder already exists, the agent leaves it as it is.
+
+### Audit log
+
+Each run keeps an audit log, `audit.jsonl` in its folder: every action and decision of every agent, one JSON object per line ([JSON Lines](https://jsonlines.org)), so you can find out later what the agent did and why.
+
+```json
+{"timestamp":"2026-11-07T22:13:34.485Z","agent":"orchestrator","action":"run-started","input":"hotspots on repository 'legacy-app'; Code Archaeologist 0.1.0 on Java 21.0.5+11-LTS; settings: history.years=5, risk-weights.fixes=1.0, risk-weights.authors=0.5, retry.max-attempts=3, quality.min-line-coverage-percent=80, quality.min-mutation-score-percent=60","outcome":"run 20261107T221334Z-4997 started"}
+{"timestamp":"2026-11-07T22:13:34.489Z","agent":"orchestrator","action":"run-finished","input":"","outcome":"succeeded"}
+```
+
+| Field | Meaning |
+|---|---|
+| `timestamp` | When, in UTC, with milliseconds |
+| `agent` | Who: `scout`, `excavator`, `cartographer`, `prioritization`, `guardian`, `restorer`, `judge`, `chronicler`, or `orchestrator` for the run itself |
+| `action` | What, e.g. `run-started` or `verdict` |
+| `input` | A short summary of what the action worked on (empty if nothing) |
+| `outcome` | What came out of it, or why it failed |
+
+The first event of a run records the command, the repository's folder name, the agent's version and the settings that steer its decisions. The last one records how the run ended. A run that was killed has no `run-finished` event.
+
+The log is append-only: events are only ever added at the end, and each one is written to the file at once, so a crash loses at most the event being written.
+
+Events often quote the repository (commit messages, class names), so the log is safe to read and share:
+
+- **No local paths.** Absolute paths of the repository, the current folder and your home folder are written as `<repo>`, `.` and `~`, and settings that are paths are left out.
+- **One event, one line, no surprises in a terminal.** Line breaks, terminal control codes and the characters that reorder text on screen are escaped (`\n`, `\u001B`, `\u202E`...). Accented letters stay as they are.
+- **Summaries, not dumps.** Each text is cut at 1000 characters.
+
+Any JSON Lines tool can read it, for example `jq 'select(.agent == "judge")' audit.jsonl`.
 
 ### Exit codes
 
@@ -188,6 +217,7 @@ archaeologist-agent/
 │   │   ├── cli/                     # archaeologist command and subcommands
 │   │   ├── config/                  # typed settings and the model catalog
 │   │   ├── run/                     # run ids and output folders
+│   │   ├── audit/                   # the audit log of each run
 │   │   ├── scout/
 │   │   ├── excavator/
 │   │   ├── cartographer/
@@ -216,7 +246,7 @@ The order starts with what delivers value without an LLM, and tackles the riskie
 | 2 | Guardian: characterization tests with a fixed local model | Can a local model generate tests that compile and pass on a real hotspot? |
 | 3 | Restorer: base branch with OpenRewrite + modernizations with the LLM | When should a transformation be deterministic, and when is the LLM worth it? |
 | 4 | Judge + Orchestrator with the retry loop and checkpoints | What state must be saved to resume an interrupted run? |
-| 5 | Chronicler: reports and audit log | What does a developer need to read to trust a branch without reviewing it line by line? |
+| 5 | Chronicler: reports | What does a developer need to read to trust a branch without reviewing it line by line? |
 | 6 | Scout: hardware detection and automatic model selection | How do you reliably measure available memory on Linux, Windows and macOS? |
 
 Until phase 6, the model is fixed in `config/models.yaml`.
