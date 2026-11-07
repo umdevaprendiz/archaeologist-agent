@@ -56,11 +56,13 @@ jobs:
         shell: cmd
         run: mvnw.cmd --batch-mode --no-transfer-progress verify
 
+      # Only the plain-text reports (failures and their stack traces). The XML reports of a failed test
+      # class also list every system property of the machine, such as its folders and user name.
       - name: Keep the test reports of a failed run
         if: failure()
         uses: actions/upload-artifact@v7
         with:
           name: test-reports-${{ matrix.os }}-jdk${{ matrix.java }}
-          path: target/surefire-reports/
+          path: target/surefire-reports/*.txt
           if-no-files-found: ignore
           retention-days: 7

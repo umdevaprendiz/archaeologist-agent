@@ -31,7 +31,8 @@ When a test fails after a refactoring, the agent reads the error, fixes the code
 
 - **Never touches the main branch.** It works only on `archaeologist/*` branches, in a separate working copy. Merging is the team's decision.
 - **Never edits the characterization tests** to make a refactoring pass. The Judge checks the hashes of the test files.
-- **Builds and tests run in Docker with no network** (`--network none`).
+- **Builds and tests run in Docker with no network** (`--network none`), and the container gets nothing from your machine but a copy of the repository and the agent's own dependency cache.
+- **Your private data stays private.** The agent never reads, copies or mounts your home folder or your credentials (`~/.m2/settings.xml`, `~/.gradle`, `~/.ssh`, `~/.aws`, `~/.git-credentials`...). Nothing it prints or writes shows your local paths, user name, machine name, e-mail address or secrets. Conduct tests check this on every build: they run the agent with a fake home folder full of planted credentials and fail if any of it shows up.
 - **Repository content is data, never instructions.** Comments, strings and commit messages are never followed as orders (prompt injection protection).
 - **Everything goes to an [audit log](#audit-log)**, so the team can understand each decision later.
 - **Nothing leaves the machine.** The model runs locally through [Ollama](https://ollama.com). The only internet access is the initial model download, which can also be done ahead of time for air-gapped environments.
@@ -107,9 +108,9 @@ Maven doesn't need to be installed: the project uses the Maven Wrapper (`mvnw`).
 mvnw.cmd verify
 ```
 
-This compiles the code, runs the tests and builds `target/archaeologist.jar`.
+This compiles the code, runs the tests and builds `target/archaeologist.jar`. Maven's own log names the folder you build in; add `-q` for a quiet build if you are going to share its output.
 
-The same build runs on every push and pull request, on Linux, Windows and macOS with JDK 21, plus Linux with JDK 25 ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)). When a job fails, its test reports are kept for 7 days in the run's artifacts.
+The same build runs on every push and pull request, on Linux, Windows and macOS with JDK 21, plus Linux with JDK 25 ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)). When a job fails, its plain-text test reports are kept for 7 days in the run's artifacts. The XML reports are not published: for a failed test they list the machine's system properties, such as its folders and user name.
 
 ### Commands
 
@@ -120,7 +121,7 @@ java -jar target/archaeologist.jar run <repo>        # full cycle, on archaeolog
 java -jar target/archaeologist.jar scout             # detect the hardware and pick the model
 ```
 
-`archaeologist help <command>` (or `<command> --help`) shows the details of each command. Add `--stacktrace` to see the full details of an unexpected error.
+`archaeologist help <command>` (or `<command> --help`) shows the details of each command. Add `--stacktrace` to see the full details of an unexpected error. Those details come straight from Java and may include local paths: check them before you share them.
 
 The agents behind the commands are not implemented yet: for now, `hotspots` and `run` check that `<repo>` is a Git repository and create the run's output folder and audit log, and every command then stops with a "not implemented yet" message.
 

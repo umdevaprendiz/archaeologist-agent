@@ -91,6 +91,20 @@
                     </execution>
                 </executions>
             </plugin>
+            <!-- Test output shows no local paths:
+                 - reports leave out the system properties (home folder, user name, class path) for test
+                   classes that pass. Surefire still writes them when a test fails, so CI publishes only the
+                   plain-text reports (see .github/workflows/ci.yml);
+                 - Mockito, which comes with spring-boot-starter-test, loads a Java agent at run time. The JDK
+                   then prints a warning with the agent's full path in the local Maven repository: allowing
+                   it up front keeps that warning, and the path, out of the console. -->
+            <plugin>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <enablePropertiesElement>false</enablePropertiesElement>
+                    <argLine>-XX:+EnableDynamicAgentLoading</argLine>
+                </configuration>
+            </plugin>
             <!-- Builds an executable target/archaeologist.jar, plus the build info shown by the version option -->
             <plugin>
                 <groupId>org.springframework.boot</groupId>
