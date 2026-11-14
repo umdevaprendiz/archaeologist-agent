@@ -6,6 +6,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
+import com.archaeologist.git.IsolatedGit;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -66,7 +67,7 @@ class SampleRepositoryTests {
     }
 
     private static String git(String... args) {
-        return git.run(repo, null, args);
+        return git.run(repo, args);
     }
 
     private static List<String> lines(String text) {
@@ -97,8 +98,8 @@ class SampleRepositoryTests {
         SampleRepository.create(later, TODAY.plusDays(1));
 
         String head = git("rev-parse", "HEAD");
-        assertThat(git.run(again, null, "rev-parse", "HEAD")).isEqualTo(head);
-        assertThat(git.run(later, null, "rev-parse", "HEAD")).isNotEqualTo(head);
+        assertThat(git.run(again, "rev-parse", "HEAD")).isEqualTo(head);
+        assertThat(git.run(later, "rev-parse", "HEAD")).isNotEqualTo(head);
     }
 
     @Test

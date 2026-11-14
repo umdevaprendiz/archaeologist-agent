@@ -3,11 +3,15 @@ package com.archaeologist.cli;
 import static java.nio.charset.StandardCharsets.UTF_8;
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.archaeologist.git.IsolatedGit;
+import com.archaeologist.sample.SampleRepository;
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.LocalDate;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -59,10 +63,20 @@ class ArchaeologistCliTests {
         return commandLine.execute(args);
     }
 
+    /** A Git repository with no commits yet. */
     private Path gitRepository() throws IOException {
         Path repo = Files.createDirectory(tempDir.resolve("repo"));
-        Files.createDirectory(repo.resolve(".git"));
+        try (IsolatedGit git = new IsolatedGit()) {
+            git.run(repo, "init", "--quiet", "--template=");
+        }
         return repo;
+    }
+
+    /** The first line of the output: where the run writes its files. */
+    private Matcher runStarted() {
+        Matcher started = RUN_STARTED.matcher(out.toString().lines().findFirst().orElse(""));
+        assertThat(started.matches()).as("run started: %s", out).isTrue();
+        return started;
     }
 
     @Test
@@ -155,8 +169,7 @@ class ArchaeologistCliTests {
         assertThat(run(command, gitRepository().toString())).isEqualTo(ExitCode.FAILURE.code());
         assertThat(err.toString()).contains("Error: The '" + command + "' command is not implemented yet");
 
-        Matcher started = RUN_STARTED.matcher(out.toString().strip());
-        assertThat(started.matches()).as("run started: %s", out).isTrue();
+        Matcher started = runStarted();
         assertThat(Path.of(started.group(2))).isEqualTo(outputFolder().resolve(started.group(1))).isDirectory();
     }
 
@@ -166,14 +179,12 @@ class ArchaeologistCliTests {
         Path repo = gitRepository();
         run(command, repo.toAbsolutePath().toString());
 
-        Matcher started = RUN_STARTED.matcher(out.toString().strip());
-        assertThat(started.matches()).as("run started: %s", out).isTrue();
-        List<JsonNode> events = Files.readAllLines(Path.of(started.group(2)).resolve("audit.jsonl"), UTF_8).stream()
-                .map(JsonMapper.shared()::readTree).toList();
-        assertThat(events).extracting(event -> event.get("action").asString())
-                .containsExactly("run-started", "run-finished");
+        List<JsonNode> events = auditEvents(runStarted());
+        List<String> actions = command.equals("hotspots") ? List.of("run-started", "history-read", "run-finished")
+                : List.of("run-started", "run-finished");
+        assertThat(events).extracting(event -> event.get("action").asString()).containsExactlyElementsOf(actions);
         assertThat(events.get(0).get("input").asString()).startsWith(command + " on repository 'repo'; ");
-        assertThat(events.get(1).get("outcome").asString())
+        assertThat(events.get(events.size() - 1).get("outcome").asString())
                 .startsWith("failed (exit code 1): The '" + command + "' command is not implemented yet");
 
         String home = System.getProperty("user.home");
@@ -182,6 +193,39 @@ class ArchaeologistCliTests {
                 .doesNotContainIgnoringCase(outputParent.toAbsolutePath().toString())
                 .doesNotContainIgnoringCase(home)
                 .doesNotContainIgnoringCase(home.replace('\\', '/'))));
+    }
+
+    private static List<JsonNode> auditEvents(Matcher started) throws IOException {
+        return Files.readAllLines(Path.of(started.group(2)).resolve("audit.jsonl"), UTF_8).stream()
+                .map(JsonMapper.shared()::readTree).toList();
+    }
+
+    @Test
+    void hotspotsReadsTheGitHistoryOfTheLastFiveYears() throws IOException {
+        Path sample = tempDir.resolve("legacy-shop");
+        SampleRepository.create(sample, LocalDate.now(ZoneOffset.UTC));
+
+        assertThat(run("hotspots", sample.toString())).isEqualTo(ExitCode.FAILURE.code());
+
+        // The sample's history goes back six and a half years: 38 of its 50 commits fall in the last five
+        String since = LocalDate.now(ZoneOffset.UTC).minusYears(5).toString();
+        assertThat(out.toString()).contains("Excavator: 38 commits by 5 authors since " + since + " (last 5 years).");
+        assertThat(err.toString()).contains("Error: The 'hotspots' command is not implemented yet");
+        JsonNode read = auditEvents(runStarted()).get(1);
+        assertThat(read.get("agent").asString()).isEqualTo("excavator");
+        assertThat(read.get("action").asString()).isEqualTo("history-read");
+        assertThat(read.get("input").asString())
+                .isEqualTo("Git history of the current branch since " + since + " (last 5 years), merge commits left out");
+        assertThat(read.get("outcome").asString()).matches("38 commits by 5 authors, \\d+ file changes");
+    }
+
+    @Test
+    void hotspotsRejectsADamagedGitFolder() throws IOException {
+        Path repo = Files.createDirectory(tempDir.resolve("damaged"));
+        Files.createDirectory(repo.resolve(".git"));
+
+        assertThat(run("hotspots", repo.toString())).isEqualTo(ExitCode.INVALID_REPOSITORY.code());
+        assertThat(err.toString()).contains("Error: Not a Git repository (its .git is missing or damaged): " + repo);
     }
 
     @Test

@@ -2,6 +2,8 @@ package com.archaeologist.sample;
 
 import static java.nio.charset.StandardCharsets.UTF_8;
 
+import com.archaeologist.git.GitException;
+import com.archaeologist.git.IsolatedGit;
 import com.archaeologist.run.FileErrors;
 import com.archaeologist.sample.SampleHistory.Add;
 import com.archaeologist.sample.SampleHistory.Commit;
@@ -60,10 +62,12 @@ public final class SampleRepository {
         byte[] stream = fastImportStream(history, today);
         prepare(folder);
         try (IsolatedGit git = new IsolatedGit()) {
-            git.run(folder, null, "init", "--quiet", "--template=");
+            git.run(folder, "init", "--quiet", "--template=");
             git.run(folder, stream, "fast-import", "--quiet", "--done");
-            git.run(folder, null, "symbolic-ref", "HEAD", "refs/heads/main");
-            git.run(folder, null, "reset", "--hard", "--quiet");
+            git.run(folder, "symbolic-ref", "HEAD", "refs/heads/main");
+            git.run(folder, "reset", "--hard", "--quiet");
+        } catch (GitException ex) {
+            throw new SampleException(ex.getMessage(), ex);
         }
         int oldest = history.commits.get(0).daysAgo();
         return new Summary(history.commits.size(), oldest / 365);

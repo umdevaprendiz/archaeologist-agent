@@ -40,7 +40,7 @@ IDs have a prefix per area (e.g. `EXC-02`), so branches can be named `feature/EX
 
 | ID | Feature | Delivers | Depends on |
 |---|---|---|---|
-| EXC-01 | Git log reader | Runs `git log --numstat` over the last N years (read-only) and parses each commit: hash, author, date, message, lines added and removed per file, binary files included. Git runs with the commands a repository can define switched off (hooks, external diff, text conversion, fsmonitor) and without the user's global configuration | FND-03 |
+| EXC-01 | Git log reader | Runs `git log --numstat` over the last N years (read-only) and parses each commit: hash, author, date, message, lines added and removed per file, binary files included. Git runs with the commands a repository can define switched off (hooks, external diff, text conversion, fsmonitor) and without the user's global configuration. **Done.** | FND-03 |
 | EXC-02 | Rename tracking | The history of renamed or moved files is credited to the file's current path | EXC-01 |
 | EXC-03 | Bulk commit filter | Commits that touch more than N files (reformatting, license headers, mass moves) are left out of churn, but their renames are still tracked | EXC-02 |
 | EXC-04 | Bug-fix classifier | Detects fix commits from the message with English and Portuguese keywords (`fix`, `bug`, `hotfix`, `corrige`, `erro`...) and issue-key patterns | EXC-01 |

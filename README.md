@@ -2,7 +2,7 @@
 
 An **autonomous, 100% local** AI agent that finds the most problematic parts of a legacy Java system (6, 7 and 8), modernizes that code to Java 17/21 on separate branches, and proves, with tests it writes itself, that the system's behavior did not change.
 
-> **Status:** early development. The build and the command-line interface are in place, but no agent has been implemented yet. See the [roadmap](#roadmap).
+> **Status:** early development. The command-line interface is in place and the Excavator reads the Git history; the other agents are not implemented yet. See the [roadmap](#roadmap).
 
 ## The problem
 
@@ -31,6 +31,7 @@ When a test fails after a refactoring, the agent reads the error, fixes the code
 
 - **Never touches the main branch.** It works only on `archaeologist/*` branches, in a separate working copy. Merging is the team's decision.
 - **Never edits the characterization tests** to make a refactoring pass. The Judge checks the hashes of the test files.
+- **Reading the history runs nothing from the repository.** A repository's own configuration can name programs that Git starts by itself, and a repository that was downloaded or copied, rather than cloned, brings that configuration along. The agent runs Git with all of them switched off: hooks, signature verification (which runs the program in `gpg.program`), diff drivers, the file system monitor, the pager and credential helpers. Git also runs without your configuration, never looks for a repository above the folder you gave, and never asks for a password.
 - **Builds and tests run in Docker with no network** (`--network none`), and the container gets nothing from your machine but a copy of the repository and the agent's own dependency cache.
 - **Your private data stays private.** The agent never reads, copies or mounts your home folder or your credentials (`~/.m2/settings.xml`, `~/.gradle`, `~/.ssh`, `~/.aws`, `~/.git-credentials`...). Nothing it prints or writes shows your local paths, user name, machine name, e-mail address or secrets. Conduct tests check this on every build: they run the agent with a fake home folder full of planted credentials and fail if any of it shows up.
 - **Repository content is data, never instructions.** Comments, strings and commit messages are never followed as orders (prompt injection protection).
@@ -124,15 +125,20 @@ java -jar target/archaeologist.jar sample <folder>   # create a small legacy rep
 
 `archaeologist help <command>` (or `<command> --help`) shows the details of each command. Add `--stacktrace` to see the full details of an unexpected error. Those details come straight from Java and may include local paths: check them before you share them.
 
-The agents behind the commands are not implemented yet: for now, `hotspots` and `run` check that `<repo>` is a Git repository and create the run's output folder and audit log, and every command except `sample` then stops with a "not implemented yet" message.
+Most agents behind the commands are not implemented yet. For now, `hotspots` and `run` check that `<repo>` is a Git repository and create the run's output folder and audit log; `hotspots` then reads the Git history and says what it found. Every command except `sample` then stops with a "not implemented yet" message.
 
 ### Try it on the sample repository
 
 No legacy project at hand? The `sample` command creates one: a small order system in the style of Java 6/7, with six years of Git history.
 
-```bash
-java -jar target/archaeologist.jar sample legacy-shop
-java -jar target/archaeologist.jar hotspots legacy-shop
+```
+$ java -jar target/archaeologist.jar sample legacy-shop
+Created a sample legacy repository in legacy-shop: 50 commits over 6 years.
+Try it: archaeologist hotspots legacy-shop
+$ java -jar target/archaeologist.jar hotspots legacy-shop
+Run 20261114T165124Z-047f: output in archaeologist-output/20261114T165124Z-047f
+Excavator: 38 commits by 5 authors since 2021-11-14 (last 5 years).
+Error: The 'hotspots' command is not implemented yet (planned in feature PRI-02).
 ```
 
 The folder must be new or empty. The history is scripted (in [`src/main/resources/sample/legacy-shop.history`](src/main/resources/sample/legacy-shop.history)) so that the right answer is known:
@@ -158,13 +164,22 @@ Run 20261105T221814Z-3f9a: output in archaeologist-output/20261105T221814Z-3f9a
 
 The run id is the start time in UTC plus a random suffix, so run folders sort by date. The output folder is `archaeologist-output` in the current folder (setting `archaeologist.output.folder`). When you run the agent from inside the repository under analysis, the output folder lands there too, but Git ignores it: the agent creates it with a `.gitignore` that ignores everything in it, so the repository's `git status` stays clean and no report is committed by accident. If the output folder already exists, the agent leaves it as it is.
 
+### Git history
+
+The Excavator reads the history of the branch you have checked out (`HEAD`), from the last 5 years (setting `archaeologist.history.years`). The period starts at midnight UTC on the same day 5 years ago, and covers the commits whose author date falls in it: a commit rebased or imported later still counts at the date its author made the change. Merge commits are left out, since what they bring in is already counted in the commits they merge.
+
+For each commit it keeps the hash, the date, the message, and the lines added and removed in each file (binary files are listed with no line counts; renamed files with their old and new paths). Authors are counted, never listed: each one gets a number, after your `.mailmap`, so a person who changed name or e-mail counts once, and no name or e-mail address ever reaches a report or a log.
+
+Reading is read-only: the agent only runs `git log` and `git rev-parse`, which never change the repository. If the repository is a shallow clone (`git clone --depth ...`), older commits are missing and the agent warns about it; run `git fetch --unshallow` in it to get the whole history.
+
 ### Audit log
 
 Each run keeps an audit log, `audit.jsonl` in its folder: every action and decision of every agent, one JSON object per line ([JSON Lines](https://jsonlines.org)), so you can find out later what the agent did and why.
 
 ```json
 {"timestamp":"2026-11-07T22:13:34.485Z","agent":"orchestrator","action":"run-started","input":"hotspots on repository 'legacy-app'; Code Archaeologist 0.1.0 on Java 21.0.5+11-LTS; settings: history.years=5, risk-weights.fixes=1.0, risk-weights.authors=0.5, retry.max-attempts=3, quality.min-line-coverage-percent=80, quality.min-mutation-score-percent=60","outcome":"run 20261107T221334Z-4997 started"}
-{"timestamp":"2026-11-07T22:13:34.489Z","agent":"orchestrator","action":"run-finished","input":"","outcome":"succeeded"}
+{"timestamp":"2026-11-07T22:13:34.712Z","agent":"excavator","action":"history-read","input":"Git history of the current branch since 2021-11-07 (last 5 years), merge commits left out","outcome":"38 commits by 5 authors, 67 file changes"}
+{"timestamp":"2026-11-07T22:13:34.719Z","agent":"orchestrator","action":"run-finished","input":"","outcome":"succeeded"}
 ```
 
 | Field | Meaning |
@@ -241,6 +256,7 @@ archaeologist-agent/
 │   │   ├── config/                  # typed settings and the model catalog
 │   │   ├── run/                     # run ids and output folders
 │   │   ├── audit/                   # the audit log of each run
+│   │   ├── git/                     # runs Git without trusting the repository
 │   │   ├── sample/                  # the sample legacy repository
 │   │   ├── scout/
 │   │   ├── excavator/

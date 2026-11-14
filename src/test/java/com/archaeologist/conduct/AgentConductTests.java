@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.archaeologist.ArchaeologistApplication;
 import com.archaeologist.conduct.SensitiveDataScanner.Finding;
+import com.archaeologist.git.HostileRepository;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
@@ -38,9 +39,11 @@ import org.junit.jupiter.params.provider.MethodSource;
  *
  * <p>Runs the real command line in its own process, as a user would, with a fake home folder full of
  * planted credentials (Maven, Gradle, SSH, AWS, Git, Docker, npm), fake secrets in the environment and a
- * fake user name. Then it scans everything the agent printed or wrote for those values, for local paths,
- * e-mail addresses, secrets and hidden characters, and checks that nothing outside the output folders
- * changed.
+ * fake user name. The repository under analysis is hostile ({@link HostileRepository}): its commits are by
+ * an author whose name and e-mail are planted too, and its configuration names programs for Git to run.
+ * Then it scans everything the agent printed or wrote for those values, for local paths, e-mail addresses,
+ * secrets and hidden characters, and checks that nothing outside the output folders changed and that none
+ * of the repository's programs ran.
  *
  * <p>Every planted value is fake and random. <b>A feature that adds a command, an option or a new kind of
  * output adds a scenario here.</b>
@@ -68,6 +71,9 @@ class AgentConductTests {
     private static final String DATABASE_PASSWORD = plant("the database password in the environment",
             "CANARY-DB-" + hex(8));
     private static final String SETTING_SECRET = plant("the secret in an unknown setting", "CANARY-SETTING-" + hex(8));
+    private static final String AUTHOR_NAME = plant("the name of the repository's author", "Canary Author " + hex(4));
+    private static final String AUTHOR_EMAIL = plant("the e-mail of the repository's author",
+            "author-" + hex(4) + "@mail.example.invalid");
 
     /** What one run of the agent should do, so a scan of its output is never vacuous. */
     private record Scenario(String name, List<String> args, Map<String, String> environment, int exitCode,
@@ -80,7 +86,8 @@ class AgentConductTests {
     private static final List<Scenario> SCENARIOS = List.of(
             new Scenario("version", List.of("--version"), Map.of(), 0, "Code Archaeologist", false),
             new Scenario("help", List.of("--help"), Map.of(), 0, "Usage: archaeologist", false),
-            new Scenario("hotspots", List.of("hotspots", "legacy-repo"), Map.of(), 1, "not implemented yet", true),
+            new Scenario("hotspots", List.of("hotspots", "legacy-repo"), Map.of(), 1,
+                    "Excavator: " + HostileRepository.COMMITS + " commits by 1 author", true),
             new Scenario("run", List.of("run", "legacy-repo"), Map.of(), 1, "not implemented yet", true),
             new Scenario("scout", List.of("scout"), Map.of(), 1, "not implemented yet", false),
             new Scenario("usage-error", List.of("hotspot", "legacy-repo"), Map.of(), 2, "Unmatched argument", false),
@@ -100,6 +107,9 @@ class AgentConductTests {
      */
     private static final Pattern OUTPUT_FOLDER = Pattern.compile(
             "projects/[^/]+/archaeologist-output(/.*)?|projects/sample/legacy-shop(/.*)?");
+
+    /** Where the repository's programs would leave their markers, in each workspace. */
+    private static final String MARKERS = "repository-programs-ran";
 
     @TempDir
     static Path sandbox;
@@ -197,6 +207,15 @@ class AgentConductTests {
         }
 
         assertThat(findings).as("private data in the files written by '%s'", name).isEmpty();
+    }
+
+    /** Git never ran the programs the repository names in its configuration. */
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("scenarios")
+    void runsNoProgramOfTheRepository(String name) {
+        Path markers = RESULTS.get(name).workspace().resolve(MARKERS);
+
+        assertThat(HostileRepository.markers(markers)).as("programs of the repository run by '%s'", name).isEmpty();
     }
 
     /** The repository and the planted credentials are untouched, and nothing appears next to them. */
@@ -361,14 +380,12 @@ class AgentConductTests {
         return Files.writeString(file, content, UTF_8);
     }
 
-    /** A Git repository, a folder that is not one, and a file where an output folder could go. */
-    private static void prepareWorkspace(Path workspace) throws IOException, InterruptedException {
-        Path repo = Files.createDirectories(workspace.resolve("legacy-repo"));
-        Process git = new ProcessBuilder("git", "init", "--quiet", repo.toString()).redirectErrorStream(true).start();
-        String output = new String(git.getInputStream().readAllBytes(), UTF_8);
-        assertThat(git.waitFor(1, TimeUnit.MINUTES)).isTrue();
-        assertThat(git.exitValue()).as("git init: %s", output).isZero();
-        Files.writeString(repo.resolve("Invoice.java"), "public class Invoice {}\n", UTF_8);
+    /**
+     * A hostile Git repository with commits by the planted author, a folder that is not a repository, and a
+     * file where an output folder could go.
+     */
+    private static void prepareWorkspace(Path workspace) throws IOException {
+        HostileRepository.create(workspace.resolve("legacy-repo"), workspace.resolve(MARKERS), AUTHOR_NAME, AUTHOR_EMAIL);
         Files.writeString(Files.createDirectories(workspace.resolve("not-a-repo")).resolve("README.txt"), "notes\n");
         Files.writeString(workspace.resolve("blocked"), "a file where an output folder could go\n");
     }
